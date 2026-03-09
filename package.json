@@ -1,0 +1,23 @@
+{
+  "name": "scouting-bot",
+  "version": "1.0.0",
+  "description": "Baseball scouting calendar and ESPN scores bot for Telegram",
+  "main": "bot.js",
+  "type": "module",
+  "scripts": {
+    "start": "node bot.js",
+    "dev": "NODE_ENV=development node bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.63.0",
+    "googleapis": "^118.0.0",
+    "google-auth-library": "^9.4.1",
+    "cheerio": "^1.0.0-rc.12",
+    "axios": "^1.6.2",
+    "node-cron": "^3.0.2",
+    "dotenv": "^16.3.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
