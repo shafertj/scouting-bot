@@ -15,9 +15,10 @@
     "cheerio": "^1.0.0-rc.12",
     "axios": "^1.6.2",
     "node-cron": "^3.0.2",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "@anthropic-ai/sdk": "^0.24.3"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   }
 }

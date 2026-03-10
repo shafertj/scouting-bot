@@ -4,6 +4,7 @@ import { GoogleAuth } from 'google-auth-library';
 import cron from 'node-cron';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -18,6 +19,10 @@ const __dirname = path.dirname(__filename);
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 const GOOGLE_CREDENTIALS = process.env.GOOGLE_CREDENTIALS;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+// Initialize Anthropic client
+const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
 // Load calendars from calendars.json
 let calendarsConfig = [];
@@ -82,23 +87,68 @@ async function initializeGoogleCalendar() {
   }
 }
 
-// Format calendar events into "Morning Baseball Chron" style
-function formatCalendarChron(events) {
+// Extract state from location using Claude
+async function extractStateFromLocation(location) {
+  if (!location) return null;
+  
+  try {
+    const message = await anthropic.messages.create({
+      model: 'claude-opus-4-20250805',
+      max_tokens: 50,
+      messages: [
+        {
+          role: 'user',
+          content: `Extract the US state abbreviation (2 letters) from this location: "${location}". Respond with ONLY the 2-letter state code (e.g., IL, MO, CA). If you can't determine the state, respond with "UNKNOWN".`
+        }
+      ]
+    });
+    
+    const stateCode = message.content[0].type === 'text' ? message.content[0].text.trim().toUpperCase() : 'UNKNOWN';
+    return stateCode.length === 2 ? stateCode : 'UNKNOWN';
+  } catch (error) {
+    console.warn(`⚠ Claude error extracting state from "${location}":`, error.message);
+    return 'UNKNOWN';
+  }
+}
+
+// Format calendar events into "Morning Baseball Chron" with 3 sections
+async function formatCalendarChron(events) {
   if (!events || events.length === 0) {
     return '📅 No events found for the next 3 days.';
   }
 
   // Group events by date
   const eventsByDate = {};
-  events.forEach((event) => {
+  const eventsByTeam = {};
+  const eventsByState = {};
+
+  // Process events
+  for (const event of events) {
     const startDate = event.start.dateTime ? event.start.dateTime.split('T')[0] : event.start.date;
+    
     if (!eventsByDate[startDate]) {
       eventsByDate[startDate] = [];
     }
     eventsByDate[startDate].push(event);
-  });
 
-  // Format output
+    // Group by team
+    const teamName = event.calendarName || 'Other';
+    if (!eventsByTeam[teamName]) {
+      eventsByTeam[teamName] = [];
+    }
+    eventsByTeam[teamName].push(event);
+
+    // Extract state and group by state
+    if (event.location) {
+      const stateCode = await extractStateFromLocation(event.location);
+      if (!eventsByState[stateCode]) {
+        eventsByState[stateCode] = [];
+      }
+      eventsByState[stateCode].push(event);
+    }
+  }
+
+  // SECTION 1: Daily Chron
   let output = '🧭 Morning Baseball Chron\n───\n';
 
   Object.keys(eventsByDate)
@@ -128,6 +178,36 @@ function formatCalendarChron(events) {
       });
 
       output += '\n';
+    });
+
+  // SECTION 2: Program Snapshot
+  output += '📊 Program Snapshot\n───\n';
+
+  Object.keys(eventsByTeam)
+    .sort()
+    .forEach((team) => {
+      output += `• ${team}`;
+      const games = eventsByTeam[team];
+      const gameList = games.map((g) => {
+        const opponent = g.summary;
+        const location = g.location ? ` (${g.location})` : '';
+        return `${opponent}${location}`;
+      }).join('; ');
+      output += ` — ${gameList}\n`;
+    });
+
+  output += '\n';
+
+  // SECTION 3: Regional Breakdown
+  output += '🌎 Regional Breakdown\n───\n';
+
+  Object.keys(eventsByState)
+    .sort()
+    .forEach((state) => {
+      output += `• ${state} — `;
+      const games = eventsByState[state];
+      const gameList = games.map((g) => g.summary).join(', ');
+      output += `${gameList}\n`;
     });
 
   return output;
