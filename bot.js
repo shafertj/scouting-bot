@@ -112,6 +112,36 @@ async function initializeGoogleCalendar() {
   }
 }
 
+// Keywords that exclude an event from Program Snapshot (but still show in daily Chron)
+const SNAPSHOT_EXCLUDE_KEYWORDS = [
+  'birthday', 'hotel', 'flight', 'stay', 'workout', 'pro day',
+  'pro workout', 'reservation', 'departs', 'arrives', 'layover'
+];
+
+const CST = 'America/Chicago';
+
+function formatTimeCST(dateTimeStr) {
+  const date = new Date(dateTimeStr);
+  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: CST });
+}
+
+function formatDateCST(dateStr) {
+  // All-day events come as YYYY-MM-DD — parse without timezone shift
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return {
+    dayName: date.toLocaleDateString('en-US', { weekday: 'long' }),
+    dateStr: date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
+    dayShort: date.toLocaleDateString('en-US', { weekday: 'short' }),
+  };
+}
+
+function isSnapshotExcluded(summary) {
+  if (!summary) return true;
+  const lower = summary.toLowerCase();
+  return SNAPSHOT_EXCLUDE_KEYWORDS.some((kw) => lower.includes(kw));
+}
+
 // Format calendar events into "Morning Baseball Chron" with 2 sections
 async function formatCalendarChron(events) {
   if (!events || events.length === 0) {
@@ -124,19 +154,24 @@ async function formatCalendarChron(events) {
 
   // Process events
   for (const event of events) {
+    // Skip personal calendar events entirely
+    if (event.calendarPersonal) continue;
+
     const startDate = event.start.dateTime ? event.start.dateTime.split('T')[0] : event.start.date;
-    
+
     if (!eventsByDate[startDate]) {
       eventsByDate[startDate] = [];
     }
     eventsByDate[startDate].push(event);
 
-    // Group by team
-    const teamName = event.calendarName || 'Other';
-    if (!eventsByTeam[teamName]) {
-      eventsByTeam[teamName] = [];
+    // Group by team for Program Snapshot — exclude non-game events
+    if (!isSnapshotExcluded(event.summary) && event.start.dateTime) {
+      const teamName = event.calendarName || 'Other';
+      if (!eventsByTeam[teamName]) {
+        eventsByTeam[teamName] = [];
+      }
+      eventsByTeam[teamName].push(event);
     }
-    eventsByTeam[teamName].push(event);
   }
 
   // SECTION 1: Daily Chron
@@ -145,9 +180,7 @@ async function formatCalendarChron(events) {
   Object.keys(eventsByDate)
     .sort()
     .forEach((date) => {
-      const dateObj = new Date(date);
-      const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
-      const dateStr = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+      const { dayName, dateStr } = formatDateCST(date);
 
       output += `📅 *${dayName}, ${dateStr}*\n`;
 
@@ -155,8 +188,7 @@ async function formatCalendarChron(events) {
         let timeStr = '• ';
         const isBirthday = event.summary && event.summary.toLowerCase().includes('birthday');
         if (event.start.dateTime) {
-          const time = new Date(event.start.dateTime);
-          timeStr += time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+          timeStr += formatTimeCST(event.start.dateTime);
           timeStr += ` — ${event.summary}`;
         } else if (isBirthday) {
           timeStr += `🎂 ${event.summary}`;
@@ -186,14 +218,12 @@ async function formatCalendarChron(events) {
         // Get day and time
         let dayTime = '';
         if (g.start.dateTime) {
-          const gameDate = new Date(g.start.dateTime);
-          const dayName = gameDate.toLocaleDateString('en-US', { weekday: 'short' });
-          const time = gameDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-          dayTime = `(${dayName}/${time}) `;
+          const dayShort = new Date(g.start.dateTime).toLocaleDateString('en-US', { weekday: 'short', timeZone: 'America/Chicago' });
+          const time = formatTimeCST(g.start.dateTime);
+          dayTime = `(${dayShort}/${time}) `;
         } else if (g.start.date) {
-          const gameDate = new Date(g.start.date);
-          const dayName = gameDate.toLocaleDateString('en-US', { weekday: 'short' });
-          dayTime = `(${dayName}) `;
+          const { dayShort } = formatDateCST(g.start.date);
+          dayTime = `(${dayShort}) `;
         }
         
         const opponent = g.summary;
@@ -230,6 +260,7 @@ async function getCalendarEvents(daysAhead = 3) {
         const events = response.data.items || [];
         events.forEach((event) => {
           event.calendarName = cal.name;
+          event.calendarPersonal = cal.personal === true;
         });
         allEvents = allEvents.concat(events);
       } catch (error) {
