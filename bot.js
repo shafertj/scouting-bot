@@ -285,23 +285,27 @@ async function espnScores(dateStr = null) {
     $('div.gamePod.gamePod-type-game').each((i, gameEl) => {
       const gameContainer = $(gameEl);
       
-      // Get all team names and scores in this game
-      const teamNames = gameContainer.find('span.game-pod-team-name').map((idx, el) => $(el).text().trim()).get();
-      const teamScores = gameContainer.find('span.gamePod-game-team-score').map((idx, el) => $(el).text().trim()).get();
+      // Get team list items
+      const teamItems = gameContainer.find('ul.gamePod-game-teams li');
+      
+      if (teamItems.length >= 2) {
+        // Get first team
+        const team1El = teamItems.eq(0);
+        const team1Name = team1El.find('span.gamePod-game-team-name:not(.short)').first().text().trim();
+        const team1Score = team1El.find('span.gamePod-game-team-score').text().trim();
 
-      // We should have 2 teams and 2 scores
-      if (teamNames.length >= 2 && teamScores.length >= 2) {
-        const team1 = teamNames[0];
-        const team2 = teamNames[1];
-        const score1 = teamScores[0];
-        const score2 = teamScores[1];
+        // Get second team
+        const team2El = teamItems.eq(1);
+        const team2Name = team2El.find('span.gamePod-game-team-name:not(.short)').first().text().trim();
+        const team2Score = team2El.find('span.gamePod-game-team-score').text().trim();
 
         // Check if any of our teams are in this game
-        const hasTeam1 = TEAMS.includes(team1);
-        const hasTeam2 = TEAMS.includes(team2);
+        const hasTeam1 = TEAMS.includes(team1Name);
+        const hasTeam2 = TEAMS.includes(team2Name);
 
-        if (hasTeam1 || hasTeam2) {
-          scores.push(`${team1} ${score1} ${team2} ${score2} F`);
+        if ((hasTeam1 || hasTeam2) && team1Name && team2Name && team1Score && team2Score) {
+          scores.push(`${team1Name} ${team1Score} ${team2Name} ${team2Score} F`);
+          console.log(`✓ Found game: ${team1Name} ${team1Score} ${team2Name} ${team2Score}`);
         }
       }
     });
