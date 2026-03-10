@@ -248,6 +248,7 @@ async function getCalendarEvents(daysAhead = 3, startDate = null) {
     }
     const endDate = new Date(now);
     endDate.setDate(endDate.getDate() + daysAhead);
+    endDate.setHours(23, 59, 59, 999); // include full final day
 
     let allEvents = [];
 
@@ -411,6 +412,15 @@ async function sendCalendarChron() {
 //   /calendar +7           → next 7 days from today
 //   /calendar 2026-03-15   → 1 day starting Mar 15
 //   /calendar 2026-03-15 +7 → 7 days starting Mar 15
+function getTodayCST() {
+  const now = new Date();
+  const cst = new Date(now.toLocaleString('en-US', { timeZone: 'America/Chicago' }));
+  const y = cst.getFullYear();
+  const m = String(cst.getMonth() + 1).padStart(2, '0');
+  const d = String(cst.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 function parseCalendarArgs(argStr) {
   if (!argStr || argStr.trim() === '') {
     return { startDate: null, daysAhead: 3 };
@@ -421,7 +431,9 @@ function parseCalendarArgs(argStr) {
   let daysAhead = 1; // default for specific date = just that day
 
   for (const part of parts) {
-    if (/^\+\d+$/.test(part)) {
+    if (part.toLowerCase() === 'today') {
+      startDate = getTodayCST();
+    } else if (/^\+\d+$/.test(part)) {
       daysAhead = parseInt(part.slice(1));
     } else if (/^\d{4}-\d{2}-\d{2}$/.test(part)) {
       startDate = part;
@@ -438,26 +450,27 @@ function parseCalendarArgs(argStr) {
 
 // Bot command handlers
 const HELP_TEXT = [
-  '⚾ *Morning Baseball Chron — Command Guide*',
+  '⚾ Morning Baseball Chron — Command Guide',
   '───',
   '',
-  '📅 *Calendar*',
-  '`/calendar` — Next 3 days from today',
-  '`/calendar +N` — Next N days from today',
-  '  _Example: /calendar +7_',
-  '`/calendar YYYY-MM-DD` — Specific date only',
-  '  _Example: /calendar 2026-03-15_',
-  '`/calendar YYYY-MM-DD +N` — N days from a start date',
-  '  _Example: /calendar 2026-03-15 +7_',
+  '📅 Calendar',
+  '/calendar — Next 3 days from today',
+  '/calendar +N — Next N days from today',
+  '   Example: /calendar +7',
+  '/calendar today — Just today',
+  '/calendar YYYY-MM-DD — Specific date',
+  '   Example: /calendar 2026-03-15',
+  '/calendar YYYY-MM-DD +N — N days from a start date',
+  '   Example: /calendar 2026-03-15 +7',
   '',
-  '📊 *Scores*',
-  '`/espn_scores` — Today\'s NCAA scores for your teams',
-  '`/espn_scores YYYY-MM-DD` — Scores for a specific date',
-  '  _Example: /espn_scores 2026-03-08_',
+  '📊 Scores',
+  '/espn_scores — Today\'s NCAA scores for your teams',
+  '/espn_scores YYYY-MM-DD — Scores for a specific date',
+  '   Example: /espn_scores 2026-03-08',
   '',
-  'ℹ️ *General*',
-  '`/start` — Check bot status',
-  '`/help` — Show this guide',
+  'ℹ️ General',
+  '/start — Check bot status',
+  '/help — Show this guide',
 ].join('\n');
 
 bot.onText(/\/start/, (msg) => {
@@ -472,7 +485,7 @@ bot.onText(/\/start/, (msg) => {
 
 bot.onText(/\/help/, (msg) => {
   const chatId = msg.chat.id;
-  bot.sendMessage(chatId, HELP_TEXT, { parse_mode: 'Markdown' });
+  bot.sendMessage(chatId, HELP_TEXT);
 });
 
 bot.onText(/\/calendar(?:\s+(.+))?$/, async (msg, match) => {
