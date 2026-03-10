@@ -281,6 +281,17 @@ async function espnScores(dateStr = null) {
     const $ = cheerio.load(data);
     const scores = [];
 
+    // Debug: Check if page loaded and has content
+    const pageLength = $('body').html().length;
+    console.log(`Page loaded, size: ${pageLength} bytes`);
+
+    // Find each game pod container
+    const gamePods = $('div.gamePod');
+    console.log(`Found ${gamePods.length} total gamePod elements`);
+
+    const gameTypeGames = $('div.gamePod.gamePod-type-game');
+    console.log(`Found ${gameTypeGames.length} gamePod-type-game elements`);
+
     // Find each game pod container
     $('div.gamePod.gamePod-type-game').each((i, gameEl) => {
       const gameContainer = $(gameEl);
