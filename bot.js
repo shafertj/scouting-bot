@@ -109,31 +109,7 @@ async function initializeGoogleCalendar() {
   }
 }
 
-// Extract state from location using Claude
-async function extractStateFromLocation(location) {
-  if (!location) return null;
-  
-  try {
-    const message = await anthropic.messages.create({
-      model: 'claude-opus-4-20250515',
-      max_tokens: 50,
-      messages: [
-        {
-          role: 'user',
-          content: `Extract the US state abbreviation (2 letters) from this location: "${location}". Respond with ONLY the 2-letter state code (e.g., IL, MO, CA). If you can't determine the state, respond with "UNKNOWN".`
-        }
-      ]
-    });
-    
-    const stateCode = message.content[0].type === 'text' ? message.content[0].text.trim().toUpperCase() : 'UNKNOWN';
-    return stateCode.length === 2 ? stateCode : 'UNKNOWN';
-  } catch (error) {
-    console.warn(`⚠ Claude error extracting state from "${location}":`, error.message);
-    return 'UNKNOWN';
-  }
-}
-
-// Format calendar events into "Morning Baseball Chron" with 3 sections
+// Format calendar events into "Morning Baseball Chron" with 2 sections
 async function formatCalendarChron(events) {
   if (!events || events.length === 0) {
     return '📅 No events found for the next 3 days.';
@@ -142,7 +118,6 @@ async function formatCalendarChron(events) {
   // Group events by date
   const eventsByDate = {};
   const eventsByTeam = {};
-  const eventsByState = {};
 
   // Process events
   for (const event of events) {
@@ -159,15 +134,6 @@ async function formatCalendarChron(events) {
       eventsByTeam[teamName] = [];
     }
     eventsByTeam[teamName].push(event);
-
-    // Extract state and group by state
-    if (event.location) {
-      const stateCode = await extractStateFromLocation(event.location);
-      if (!eventsByState[stateCode]) {
-        eventsByState[stateCode] = [];
-      }
-      eventsByState[stateCode].push(event);
-    }
   }
 
   // SECTION 1: Daily Chron
@@ -208,27 +174,26 @@ async function formatCalendarChron(events) {
   Object.keys(eventsByTeam)
     .sort()
     .forEach((team) => {
-      output += `• ${team}`;
+      output += `• ${team} — `;
       const games = eventsByTeam[team];
       const gameList = games.map((g) => {
+        // Get day and time
+        let dayTime = '';
+        if (g.start.dateTime) {
+          const gameDate = new Date(g.start.dateTime);
+          const dayName = gameDate.toLocaleDateString('en-US', { weekday: 'short' });
+          const time = gameDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+          dayTime = `(${dayName}/${time}) `;
+        } else if (g.start.date) {
+          const gameDate = new Date(g.start.date);
+          const dayName = gameDate.toLocaleDateString('en-US', { weekday: 'short' });
+          dayTime = `(${dayName}) `;
+        }
+        
         const opponent = g.summary;
         const location = g.location ? ` (${g.location})` : '';
-        return `${opponent}${location}`;
+        return `${dayTime}${opponent}${location}`;
       }).join('; ');
-      output += ` — ${gameList}\n`;
-    });
-
-  output += '\n';
-
-  // SECTION 3: Regional Breakdown
-  output += '🌎 Regional Breakdown\n───\n';
-
-  Object.keys(eventsByState)
-    .sort()
-    .forEach((state) => {
-      output += `• ${state} — `;
-      const games = eventsByState[state];
-      const gameList = games.map((g) => g.summary).join(', ');
       output += `${gameList}\n`;
     });
 
