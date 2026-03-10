@@ -93,7 +93,7 @@ async function extractStateFromLocation(location) {
   
   try {
     const message = await anthropic.messages.create({
-      model: 'claude-opus-4-20250515',
+      model: 'claude-opus-4-20250805',
       max_tokens: 50,
       messages: [
         {
@@ -382,11 +382,24 @@ bot.onText(/\/start/, (msg) => {
 bot.onText(/\/calendar/, async (msg) => {
   const chatId = msg.chat.id;
   try {
+    console.log('📅 Fetching calendar events...');
     const events = await getCalendarEvents(3);
-    const message = formatCalendarChron(events);
+    console.log(`✓ Found ${events.length} events`);
+    
+    console.log('🧭 Formatting chron...');
+    const message = await formatCalendarChron(events);
+    console.log(`✓ Formatted message length: ${message.length}`);
+    
+    if (!message || message.length === 0) {
+      await bot.sendMessage(chatId, '❌ Formatter returned empty message');
+      return;
+    }
+    
     await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+    console.log('✓ Message sent');
   } catch (error) {
-    bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+    console.error('❌ Calendar command error:', error);
+    await bot.sendMessage(chatId, `❌ Error: ${error.message}`);
   }
 });
 
