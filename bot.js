@@ -93,7 +93,7 @@ async function extractStateFromLocation(location) {
   
   try {
     const message = await anthropic.messages.create({
-      model: 'claude-opus-4-20250805',
+      model: 'claude-opus-4-20250515',
       max_tokens: 50,
       messages: [
         {
