@@ -288,6 +288,8 @@ async function espnScores(dateStr = null) {
       // Get team list items
       const teamItems = gameContainer.find('ul.gamePod-game-teams li');
       
+      console.log(`Game ${i}: Found ${teamItems.length} team items`);
+      
       if (teamItems.length >= 2) {
         // Get first team
         const team1El = teamItems.eq(0);
@@ -299,9 +301,13 @@ async function espnScores(dateStr = null) {
         const team2Name = team2El.find('span.gamePod-game-team-name:not(.short)').first().text().trim();
         const team2Score = team2El.find('span.gamePod-game-team-score').text().trim();
 
+        console.log(`Game ${i}: ${team1Name} vs ${team2Name}`);
+
         // Check if any of our teams are in this game
         const hasTeam1 = TEAMS.includes(team1Name);
         const hasTeam2 = TEAMS.includes(team2Name);
+
+        console.log(`Game ${i}: hasTeam1=${hasTeam1}, hasTeam2=${hasTeam2}`);
 
         if ((hasTeam1 || hasTeam2) && team1Name && team2Name && team1Score && team2Score) {
           scores.push(`${team1Name} ${team1Score} ${team2Name} ${team2Score} F`);
