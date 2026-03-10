@@ -140,7 +140,7 @@ async function formatCalendarChron(events) {
   }
 
   // SECTION 1: Daily Chron
-  let output = '🧭 Morning Baseball Chron\n───\n';
+  let output = '🧭 *Morning Baseball Chron*\n───\n';
 
   Object.keys(eventsByDate)
     .sort()
@@ -149,18 +149,21 @@ async function formatCalendarChron(events) {
       const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
       const dateStr = dateObj.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
-      output += `📅 ${dayName}, ${dateStr}\n`;
+      output += `📅 *${dayName}, ${dateStr}*\n`;
 
       eventsByDate[date].forEach((event) => {
         let timeStr = '• ';
+        const isBirthday = event.summary && event.summary.toLowerCase().includes('birthday');
         if (event.start.dateTime) {
           const time = new Date(event.start.dateTime);
           timeStr += time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+          timeStr += ` — ${event.summary}`;
+        } else if (isBirthday) {
+          timeStr += `🎂 ${event.summary}`;
         } else {
-          timeStr += 'All day';
+          timeStr += `All day — ${event.summary}`;
         }
 
-        timeStr += ` — ${event.summary}`;
         if (event.location) {
           timeStr += ` (${event.location})`;
         }
@@ -172,12 +175,12 @@ async function formatCalendarChron(events) {
     });
 
   // SECTION 2: Program Snapshot
-  output += '📊 Program Snapshot\n───\n';
+  output += '📊 *Program Snapshot*\n───\n';
 
   Object.keys(eventsByTeam)
     .sort()
     .forEach((team) => {
-      output += `• ${team} — `;
+      output += `• *${team}* — `;
       const games = eventsByTeam[team];
       const gameList = games.map((g) => {
         // Get day and time
