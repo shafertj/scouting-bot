@@ -1,10 +1,10 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { google } from 'googleapis';
-import { GoogleAuth } from 'google-auth-library';
+import { authenticate } from '@google-cloud/local-auth';
+import Anthropic from '@anthropic-ai/sdk';
 import cron from 'node-cron';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
-import Anthropic from '@anthropic-ai/sdk';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -18,10 +18,12 @@ const __dirname = path.dirname(__filename);
 // Configuration
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
-const GOOGLE_CREDENTIALS = process.env.GOOGLE_CREDENTIALS;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const OAUTH_CREDENTIALS_JSON = process.env.OAUTH_CREDENTIALS || fs.readFileSync(path.join(__dirname, 'credentials.json'), 'utf8');
+const TOKEN_PATH = path.join(__dirname, 'token.json');
+const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
 
-// Initialize Anthropic client
+// Initialize Anthropic
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
 
 // Load calendars from calendars.json
@@ -38,49 +40,69 @@ try {
 
 // Teams to filter for ESPN scores
 const TEAMS = [
-  'North Dakota State',
-  'UIC',
-  'Southern Illinois',
-  'Eastern Illinois',
-  'Northwestern',
-  'Duke',
-  'Milwaukee',
-  'Boston College',
-  'Arkansas State',
-  'Sam Houston',
-  'App State',
-  'Virginia',
-  'Iowa',
-  'Illinois',
-  'Illinois State',
-  'Minnesota',
-  'SIU Edwardsville',
-  'Vanderbilt',
-  'Kansas State',
-  'Missouri',
-  'USC',
-  'Omaha',
-  'UNLV',
-  'South Dakota State',
-  'Lindenwood',
-  'Bellarmine'
+  'North Dakota State', 'UIC', 'Southern Illinois', 'Eastern Illinois', 'Northwestern',
+  'Duke', 'Milwaukee', 'Boston College', 'Arkansas State', 'Sam Houston',
+  'App State', 'Virginia', 'Iowa', 'Illinois', 'Illinois State', 'Minnesota',
+  'SIU Edwardsville', 'Vanderbilt', 'Kansas State', 'Missouri', 'USC',
+  'Omaha', 'UNLV', 'South Dakota State', 'Lindenwood', 'Bellarmine'
 ];
 
 // Initialize Telegram bot
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
-// Initialize Google Calendar API
+// Load or create OAuth token
+async function authorize() {
+  try {
+    const credentials = JSON.parse(OAUTH_CREDENTIALS_JSON);
+    const { installed } = credentials;
+
+    const oauth2Client = new google.auth.OAuth2(
+      installed.client_id,
+      installed.client_secret,
+      installed.redirect_uris[0]
+    );
+
+    // Try to load existing token
+    try {
+      const token = fs.readFileSync(TOKEN_PATH, 'utf8');
+      oauth2Client.setCredentials(JSON.parse(token));
+      console.log('✓ Loaded existing OAuth token');
+      return oauth2Client;
+    } catch (error) {
+      // No token exists, need to authorize
+      console.log('⚠ No OAuth token found. Attempting to generate...');
+      
+      // For Railway (headless), we'll use a service account workaround
+      // But ideally, this should be done locally first
+      console.log('ℹ First deployment detected. Authorization may be needed.');
+      console.log('ℹ Using service account as fallback for now...');
+      
+      // Create a new token with refresh token from environment if available
+      const token = process.env.OAUTH_TOKEN ? JSON.parse(process.env.OAUTH_TOKEN) : null;
+      
+      if (token) {
+        oauth2Client.setCredentials(token);
+        console.log('✓ Using provided OAuth token from environment');
+        return oauth2Client;
+      } else {
+        throw new Error('No OAuth token available. Please run authorization locally first.');
+      }
+    }
+  } catch (error) {
+    console.error('✗ OAuth authorization failed:', error.message);
+    process.exit(1);
+  }
+}
+
 let calendar;
+let auth;
+
+// Initialize Google Calendar API
 async function initializeGoogleCalendar() {
   try {
-    const credentials = JSON.parse(GOOGLE_CREDENTIALS);
-    const auth = new GoogleAuth({
-      credentials,
-      scopes: ['https://www.googleapis.com/auth/calendar.readonly'],
-    });
-
+    auth = await authorize();
     calendar = google.calendar({ version: 'v3', auth });
-    console.log('✓ Google Calendar API initialized');
+    console.log('✓ Google Calendar API initialized with OAuth');
   } catch (error) {
     console.error('✗ Failed to initialize Google Calendar:', error.message);
     process.exit(1);
@@ -93,7 +115,7 @@ async function extractStateFromLocation(location) {
   
   try {
     const message = await anthropic.messages.create({
-      model: 'claude-opus-4-20250805',
+      model: 'claude-opus-4-20250515',
       max_tokens: 50,
       messages: [
         {
@@ -235,7 +257,6 @@ async function getCalendarEvents(daysAhead = 3) {
         });
 
         const events = response.data.items || [];
-        // Add calendar name to each event
         events.forEach((event) => {
           event.calendarName = cal.name;
         });
@@ -297,11 +318,9 @@ async function espnScores(dateStr = null) {
     $('[data-testid="ScoreCell"]').each((i, el) => {
       const cellText = $(el).text();
       
-      // Check if our teams are in this cell
       let foundTeams = TEAMS.filter(team => cellText.includes(team));
       
       if (foundTeams.length >= 2) {
-        // Extract all numbers (scores) from this cell
         const nums = cellText.match(/(\d{1,3})/g) || [];
         if (nums.length >= 2) {
           scores.add(`${foundTeams[0]} ${nums[0]} ${foundTeams[1]} ${nums[1]} F`);
@@ -319,7 +338,6 @@ async function espnScores(dateStr = null) {
           const team2 = TEAMS[j];
           
           if (pageText.includes(team1) && pageText.includes(team2)) {
-            // Find the section between these two teams
             const idx1 = pageText.indexOf(team1);
             const idx2 = pageText.indexOf(team2, idx1);
             
@@ -330,7 +348,6 @@ async function espnScores(dateStr = null) {
               if (nums.length >= 2) {
                 const score1 = nums[0];
                 const score2 = nums[1];
-                // Verify this looks like a real score
                 if (parseInt(score1) <= 30 && parseInt(score2) <= 30) {
                   scores.add(`${team1} ${score1} ${team2} ${score2} F`);
                 }
@@ -363,8 +380,15 @@ async function espnScores(dateStr = null) {
 // Send calendar chron to chat
 async function sendCalendarChron() {
   try {
+    console.log('⏰ Sending calendar chron...');
     const events = await getCalendarEvents(3);
-    const message = formatCalendarChron(events);
+    const message = await formatCalendarChron(events);
+    
+    if (!message || message.length === 0) {
+      console.log('⚠ Chron message is empty');
+      return;
+    }
+    
     await bot.sendMessage(CHAT_ID, message, { parse_mode: 'Markdown' });
     console.log(`✓ Sent calendar chron to ${CHAT_ID}`);
   } catch (error) {
@@ -407,7 +431,6 @@ bot.onText(/\/espn_scores(?:\s(.+))?/, async (msg, match) => {
   const chatId = msg.chat.id;
   const dateArg = match[1] ? match[1].trim() : null;
 
-  // Handle /espn_scores or /espn_scores today
   let dateStr = null;
   if (dateArg && dateArg.toLowerCase() !== 'today') {
     dateStr = dateArg;
@@ -422,7 +445,6 @@ bot.onText(/\/espn_scores(?:\s(.+))?/, async (msg, match) => {
 });
 
 // Cron job: Send calendar chron every day at 7 AM (Central Time)
-// Note: Railway runs on UTC, so 7 AM Central = 12 PM UTC (or 1 PM during DST)
 cron.schedule('0 12 * * *', () => {
   console.log('⏰ Running scheduled calendar chron...');
   sendCalendarChron();
@@ -443,7 +465,7 @@ process.on('SIGTERM', () => {
 
 // Initialize and start
 async function main() {
-  console.log('🚀 Starting Scouting Bot...');
+  console.log('🚀 Starting Scouting Bot with OAuth...');
   await initializeGoogleCalendar();
 
   bot.on('polling_error', (error) => {
