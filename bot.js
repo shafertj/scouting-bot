@@ -38,14 +38,17 @@ try {
   process.exit(1);
 }
 
-// Teams to filter for ESPN scores
-const TEAMS = [
-  'North Dakota State', 'UIC', 'Southern Illinois', 'Eastern Illinois', 'Northwestern',
-  'Duke', 'Milwaukee', 'Boston College', 'Arkansas State', 'Sam Houston',
-  'App State', 'Virginia', 'Iowa', 'Illinois', 'Illinois State', 'Minnesota',
-  'SIU Edwardsville', 'Vanderbilt', 'Kansas State', 'Missouri', 'USC',
-  'Omaha', 'UNLV', 'South Dakota State', 'Lindenwood', 'Bellarmine'
-];
+// Load teams from teams.json
+let TEAMS = [];
+try {
+  const teamsPath = path.join(__dirname, 'teams.json');
+  const teamsData = fs.readFileSync(teamsPath, 'utf8');
+  TEAMS = JSON.parse(teamsData).teams;
+  console.log(`✓ Loaded ${TEAMS.length} teams from teams.json`);
+} catch (error) {
+  console.error('✗ Failed to load teams.json:', error.message);
+  process.exit(1);
+}
 
 // Initialize Telegram bot
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
@@ -245,7 +248,7 @@ async function getCalendarEvents(daysAhead = 3) {
   }
 }
 
-// Scrape ESPN for college baseball scores
+// Scrape NCAA for college baseball scores
 async function espnScores(dateStr = null) {
   try {
     let targetDate;
@@ -263,11 +266,10 @@ async function espnScores(dateStr = null) {
     const month = String(targetDate.getMonth() + 1).padStart(2, '0');
     const day = String(targetDate.getDate()).padStart(2, '0');
     const formattedDate = `${year}-${month}-${day}`;
-    const espnDate = formattedDate.replace(/-/g, '');
 
-    const url = `https://www.espn.com/college-baseball/scoreboard?date=${espnDate}`;
+    const url = `https://www.ncaa.com/scoreboard/baseball/d1/${year}/${month}/${day}/all-conf`;
 
-    console.log(`Fetching ESPN scores from: ${url}`);
+    console.log(`Fetching NCAA scores from: ${url}`);
 
     const { data } = await axios.get(url, {
       headers: {
@@ -277,67 +279,48 @@ async function espnScores(dateStr = null) {
     });
 
     const $ = cheerio.load(data);
-    const scores = new Set();
+    const scores = [];
 
-    // Strategy 1: Look for score cells with team data
-    $('[data-testid="ScoreCell"]').each((i, el) => {
-      const cellText = $(el).text();
+    // Find each game pod container
+    $('div.gamePod.gamePod-type-game').each((i, gameEl) => {
+      const gameContainer = $(gameEl);
       
-      let foundTeams = TEAMS.filter(team => cellText.includes(team));
-      
-      if (foundTeams.length >= 2) {
-        const nums = cellText.match(/(\d{1,3})/g) || [];
-        if (nums.length >= 2) {
-          scores.add(`${foundTeams[0]} ${nums[0]} ${foundTeams[1]} ${nums[1]} F`);
+      // Get all team names and scores in this game
+      const teamNames = gameContainer.find('span.game-pod-team-name').map((idx, el) => $(el).text().trim()).get();
+      const teamScores = gameContainer.find('span.gamePod-game-team-score').map((idx, el) => $(el).text().trim()).get();
+
+      // We should have 2 teams and 2 scores
+      if (teamNames.length >= 2 && teamScores.length >= 2) {
+        const team1 = teamNames[0];
+        const team2 = teamNames[1];
+        const score1 = teamScores[0];
+        const score2 = teamScores[1];
+
+        // Check if any of our teams are in this game
+        const hasTeam1 = TEAMS.includes(team1);
+        const hasTeam2 = TEAMS.includes(team2);
+
+        if (hasTeam1 || hasTeam2) {
+          scores.push(`${team1} ${score1} ${team2} ${score2} F`);
         }
       }
     });
 
-    // Strategy 2: Search full page text for team name patterns
-    if (scores.size === 0) {
-      const pageText = $('body').text();
-      
-      for (let i = 0; i < TEAMS.length; i++) {
-        for (let j = i + 1; j < TEAMS.length; j++) {
-          const team1 = TEAMS[i];
-          const team2 = TEAMS[j];
-          
-          if (pageText.includes(team1) && pageText.includes(team2)) {
-            const idx1 = pageText.indexOf(team1);
-            const idx2 = pageText.indexOf(team2, idx1);
-            
-            if (idx2 > idx1 && idx2 - idx1 < 500) {
-              const section = pageText.substring(idx1 - 50, idx2 + team2.length + 50);
-              const nums = section.match(/(\d{1,3})/g) || [];
-              
-              if (nums.length >= 2) {
-                const score1 = nums[0];
-                const score2 = nums[1];
-                if (parseInt(score1) <= 30 && parseInt(score2) <= 30) {
-                  scores.add(`${team1} ${score1} ${team2} ${score2} F`);
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (scores.size === 0) {
+    if (scores.length === 0) {
       return `📊 No games found for your teams on ${formattedDate}\n\nTip: Scores may not be available yet. Try again after games complete.`;
     }
 
     const dayName = targetDate.toLocaleDateString('en-US', { weekday: 'long' });
     const monthDay = targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-    let output = `📊 ESPN Scores — ${dayName}, ${monthDay}\n───\n`;
-    Array.from(scores).slice(0, 20).forEach((score) => {
+    let output = `📊 NCAA Baseball Scores — ${dayName}, ${monthDay}\n───\n`;
+    scores.forEach((score) => {
       output += score + '\n';
     });
 
     return output;
   } catch (error) {
-    console.error('✗ ESPN scrape error:', error.message);
+    console.error('✗ NCAA scrape error:', error.message);
     return `❌ Failed to fetch scores. Please try again later.`;
   }
 }
