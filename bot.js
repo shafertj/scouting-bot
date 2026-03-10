@@ -236,11 +236,17 @@ async function formatCalendarChron(events) {
   return output;
 }
 
-// Fetch calendar events from all calendars for next N days
-async function getCalendarEvents(daysAhead = 3) {
+// Fetch calendar events from all calendars for next N days, with optional start date
+async function getCalendarEvents(daysAhead = 3, startDate = null) {
   try {
-    const now = new Date();
-    const endDate = new Date();
+    let now;
+    if (startDate) {
+      const [y, m, d] = startDate.split('-').map(Number);
+      now = new Date(y, m - 1, d, 0, 0, 0, 0);
+    } else {
+      now = new Date();
+    }
+    const endDate = new Date(now);
     endDate.setDate(endDate.getDate() + daysAhead);
 
     let allEvents = [];
@@ -399,29 +405,94 @@ async function sendCalendarChron() {
   }
 }
 
+// Parse calendar command arguments
+// Supported formats:
+//   /calendar              → next 3 days from today
+//   /calendar +7           → next 7 days from today
+//   /calendar 2026-03-15   → 1 day starting Mar 15
+//   /calendar 2026-03-15 +7 → 7 days starting Mar 15
+function parseCalendarArgs(argStr) {
+  if (!argStr || argStr.trim() === '') {
+    return { startDate: null, daysAhead: 3 };
+  }
+
+  const parts = argStr.trim().split(/\s+/);
+  let startDate = null;
+  let daysAhead = 1; // default for specific date = just that day
+
+  for (const part of parts) {
+    if (/^\+\d+$/.test(part)) {
+      daysAhead = parseInt(part.slice(1));
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(part)) {
+      startDate = part;
+    }
+  }
+
+  // If only a +N was given with no date, start from today with N days
+  if (!startDate && daysAhead !== 1) {
+    return { startDate: null, daysAhead };
+  }
+
+  return { startDate, daysAhead };
+}
+
 // Bot command handlers
+const HELP_TEXT = [
+  '⚾ *Morning Baseball Chron — Command Guide*',
+  '───',
+  '',
+  '📅 *Calendar*',
+  '`/calendar` — Next 3 days from today',
+  '`/calendar +N` — Next N days from today',
+  '  _Example: /calendar +7_',
+  '`/calendar YYYY-MM-DD` — Specific date only',
+  '  _Example: /calendar 2026-03-15_',
+  '`/calendar YYYY-MM-DD +N` — N days from a start date',
+  '  _Example: /calendar 2026-03-15 +7_',
+  '',
+  '📊 *Scores*',
+  '`/espn_scores` — Today\'s NCAA scores for your teams',
+  '`/espn_scores YYYY-MM-DD` — Scores for a specific date',
+  '  _Example: /espn_scores 2026-03-08_',
+  '',
+  'ℹ️ *General*',
+  '`/start` — Check bot status',
+  '`/help` — Show this guide',
+].join('\n');
+
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
-  const helpText = `⚾ Scouting Bot Ready!\n\nCommands:\n/calendar — Get next 3 days of events\n/espn_scores — Today's scores\n/espn_scores YYYY-MM-DD — Scores for specific date`;
-  bot.sendMessage(chatId, helpText);
+  const startText = [
+    '⚾ Scouting Bot is running!',
+    '',
+    'Type /help for a full command guide.',
+  ].join('\n');
+  bot.sendMessage(chatId, startText);
 });
 
-bot.onText(/\/calendar/, async (msg) => {
+bot.onText(/\/help/, (msg) => {
+  const chatId = msg.chat.id;
+  bot.sendMessage(chatId, HELP_TEXT, { parse_mode: 'Markdown' });
+});
+
+bot.onText(/\/calendar(?:\s+(.+))?$/, async (msg, match) => {
   const chatId = msg.chat.id;
   try {
-    console.log('📅 Fetching calendar events...');
-    const events = await getCalendarEvents(3);
+    const { startDate, daysAhead } = parseCalendarArgs(match[1]);
+
+    console.log(`📅 Fetching calendar events: startDate=${startDate || 'today'}, daysAhead=${daysAhead}`);
+    const events = await getCalendarEvents(daysAhead, startDate);
     console.log(`✓ Found ${events.length} events`);
-    
+
     console.log('🧭 Formatting chron...');
     const message = await formatCalendarChron(events);
     console.log(`✓ Formatted message length: ${message.length}`);
-    
+
     if (!message || message.length === 0) {
       await bot.sendMessage(chatId, '❌ Formatter returned empty message');
       return;
     }
-    
+
     await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
     console.log('✓ Message sent');
   } catch (error) {
