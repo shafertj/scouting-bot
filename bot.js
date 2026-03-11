@@ -296,56 +296,6 @@ async function getCalendarEvents(daysAhead = 3, startDate = null) {
   }
 }
 
-// ─── Calendar Formatter ──────────────────────────────────────────────────────
-
-async function formatCalendar(events) {
-  if (!events || events.length === 0) {
-    return '📅 No events found.';
-  }
-
-  const eventsByDate = {};
-
-  for (const event of events) {
-    if (event.calendarPersonal) continue;
-    const startDate = event.start.dateTime ? event.start.dateTime.split('T')[0] : event.start.date;
-    if (!eventsByDate[startDate]) eventsByDate[startDate] = [];
-    eventsByDate[startDate].push(event);
-  }
-
-  let output = '🧭 *Morning Baseball Chron*\n───\n';
-
-  for (const date of Object.keys(eventsByDate).sort()) {
-    const { dayName, dateStr } = formatDateCST(date);
-    output += `📅 *${dayName}, ${dateStr}*\n`;
-
-    for (const event of eventsByDate[date]) {
-      let timeStr = '• ';
-      const isBirthday = event.summary && event.summary.toLowerCase().includes('birthday');
-
-      if (event.start.dateTime) {
-        timeStr += formatTimeCST(event.start.dateTime);
-        timeStr += ` — ${event.summary}`;
-        if (event.location) timeStr += ` (${event.location})`;
-        // Add weather for timed events with a location
-        const weatherTag = await getWeatherTag(event);
-        timeStr += weatherTag;
-      } else if (isBirthday) {
-        timeStr += `🎂 ${event.summary}`;
-      } else {
-        timeStr += `All day — ${event.summary}`;
-        if (event.location) timeStr += ` (${event.location})`;
-      }
-
-      output += `${timeStr}\n`;
-    }
-    output += '\n';
-  }
-
-  return output;
-}
-
-// ─── Program Snapshot Formatter ──────────────────────────────────────────────
-
 // Known team name mappings for shortening
 const TEAM_SHORT_NAMES = {
   'eastern illinois university baseball': 'EIU',
@@ -412,6 +362,85 @@ function shortenGameSummary(summary) {
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
+
+
+// ─── Calendar Formatter ──────────────────────────────────────────────────────
+
+// Clean up location strings — strip leading comma/space from blank city
+function cleanLocation(location) {
+  if (!location) return null;
+  // Remove leading ", " or ", ," artifacts from blank city fields
+  const cleaned = location.replace(/^[,\s]+/, '').trim();
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+// Generate a deduplication key for a game event
+// Events from two different calendars for the same game share date+time+location
+function dedupKey(event) {
+  const date = event.start.dateTime ? event.start.dateTime.split('T')[0] : event.start.date;
+  const time = event.start.dateTime ? event.start.dateTime : '';
+  const loc = (event.location || '').toLowerCase().trim();
+  return `${date}|${time}|${loc}`;
+}
+
+async function formatCalendar(events) {
+  if (!events || events.length === 0) {
+    return '📅 No events found.';
+  }
+
+  const eventsByDate = {};
+  const seenKeys = new Set();
+
+  for (const event of events) {
+    if (event.calendarPersonal) continue;
+
+    // Deduplicate timed game events by date+time+location
+    if (event.start.dateTime && !isSnapshotExcluded(event.summary)) {
+      const key = dedupKey(event);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+    }
+
+    const startDate = event.start.dateTime ? event.start.dateTime.split('T')[0] : event.start.date;
+    if (!eventsByDate[startDate]) eventsByDate[startDate] = [];
+    eventsByDate[startDate].push(event);
+  }
+
+  let output = '🧭 *Morning Baseball Chron*\n───\n';
+
+  for (const date of Object.keys(eventsByDate).sort()) {
+    const { dayName, dateStr } = formatDateCST(date);
+    output += `📅 *${dayName}, ${dateStr}*\n`;
+
+    for (const event of eventsByDate[date]) {
+      let timeStr = '• ';
+      const isBirthday = event.summary && event.summary.toLowerCase().includes('birthday');
+
+      if (event.start.dateTime) {
+        timeStr += formatTimeCST(event.start.dateTime);
+        const shortName = shortenGameSummary(event.summary);
+        timeStr += ` — ${shortName}`;
+        const loc = cleanLocation(event.location);
+        if (loc) timeStr += ` (${loc})`;
+        const weatherTag = await getWeatherTag(event);
+        timeStr += weatherTag;
+      } else if (isBirthday) {
+        timeStr += `🎂 ${event.summary}`;
+      } else {
+        timeStr += `All day — ${event.summary}`;
+        const loc = cleanLocation(event.location);
+        if (loc) timeStr += ` (${loc})`;
+      }
+
+      output += `${timeStr}\n`;
+    }
+    output += '\n';
+  }
+
+  return output;
+}
+
+// ─── Program Snapshot Formatter ──────────────────────────────────────────────
 
 async function formatProgramSnapshot(events) {
   if (!events || events.length === 0) return '📊 No games found.';
