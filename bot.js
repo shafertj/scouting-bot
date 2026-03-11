@@ -560,15 +560,43 @@ bot.onText(/\/program_snapshot(?:\s+(.+))?$/, async (msg, match) => {
 });
 
 // State priority order for /game_states
-const STATE_PRIORITY = ['IL', 'WI', 'IA', 'MN', 'SD', 'ND'];
+const STATE_PRIORITY = ['IL', 'WI', 'IA', 'MN', 'SD', 'ND', 'NE'];
+
+// All valid US state abbreviations
+const US_STATES = new Set([
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+  'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+  'VA','WA','WV','WI','WY','DC'
+]);
 
 function extractState(location) {
   if (!location) return null;
-  // Match 2-letter state abbreviation, e.g. "Iowa City, IA" or "Iowa City, IA — Venue"
-  const match = location.match(/\b([A-Z]{2})\b/g);
-  if (!match) return null;
-  // Return last 2-letter match (usually the state)
-  return match[match.length - 1];
+
+  // Strategy 1: "City, ST" or "City, ST " or "City, ST —" or "City, ST 12345"
+  const commaState = location.match(/,\s*([A-Z]{2})(?:\b|\s|$|\d|-|—)/g);
+  if (commaState) {
+    for (const m of commaState) {
+      const abbr = m.replace(/,\s*/, '').substring(0, 2);
+      if (US_STATES.has(abbr)) {
+        console.log(`extractState: "${location}" → "${abbr}" (comma match)`);
+        return abbr;
+      }
+    }
+  }
+
+  // Strategy 2: any standalone 2-letter word that is a valid state
+  const words = location.split(/[\s,.()\/—–-]+/);
+  for (const word of words) {
+    const upper = word.toUpperCase();
+    if (upper.length === 2 && US_STATES.has(upper)) {
+      console.log(`extractState: "${location}" → "${upper}" (word match)`);
+      return upper;
+    }
+  }
+
+  console.log(`extractState: "${location}" → NO STATE FOUND`);
+  return null;
 }
 
 function sortStateKeys(states) {
