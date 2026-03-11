@@ -570,32 +570,56 @@ const US_STATES = new Set([
   'VA','WA','WV','WI','WY','DC'
 ]);
 
+// Maps full names, dotted abbreviations, and short forms to 2-letter codes
+const STATE_NAME_MAP = {
+  'alabama':'AL','alaska':'AK','arizona':'AZ','arkansas':'AR','california':'CA',
+  'colorado':'CO','connecticut':'CT','delaware':'DE','florida':'FL','georgia':'GA',
+  'hawaii':'HI','idaho':'ID','illinois':'IL','indiana':'IN','iowa':'IA',
+  'kansas':'KS','kentucky':'KY','louisiana':'LA','maine':'ME','maryland':'MD',
+  'massachusetts':'MA','michigan':'MI','minnesota':'MN','mississippi':'MS',
+  'missouri':'MO','montana':'MT','nebraska':'NE','nevada':'NV',
+  'new hampshire':'NH','new jersey':'NJ','new mexico':'NM','new york':'NY',
+  'north carolina':'NC','north dakota':'ND','ohio':'OH','oklahoma':'OK',
+  'oregon':'OR','pennsylvania':'PA','rhode island':'RI','south carolina':'SC',
+  'south dakota':'SD','tennessee':'TN','texas':'TX','utah':'UT','vermont':'VT',
+  'virginia':'VA','washington':'WA','west virginia':'WV','wisconsin':'WI',
+  'wyoming':'WY',
+  'ill':'IL','ala':'AL','ariz':'AZ','ark':'AR','calif':'CA','colo':'CO',
+  'conn':'CT','fla':'FL','ind':'IN','kan':'KS','mass':'MA','mich':'MI',
+  'minn':'MN','miss':'MS','mont':'MT','neb':'NE','nev':'NV','okla':'OK',
+  'ore':'OR','tenn':'TN','tex':'TX','wash':'WA','wis':'WI','wyo':'WY'
+};
+
 function extractState(location) {
   if (!location) return null;
+  const loc = location.trim();
 
-  // Strategy 1: "City, ST" or "City, ST " or "City, ST —" or "City, ST 12345"
-  const commaState = location.match(/,\s*([A-Z]{2})(?:\b|\s|$|\d|-|—)/g);
-  if (commaState) {
-    for (const m of commaState) {
-      const abbr = m.replace(/,\s*/, '').substring(0, 2);
-      if (US_STATES.has(abbr)) {
-        console.log(`extractState: "${location}" → "${abbr}" (comma match)`);
-        return abbr;
-      }
-    }
-  }
+  // Tokenize on spaces and commas, strip trailing periods from each token
+  const tokens = loc.split(/[\s,]+/).map(t => t.replace(/\.$/, '').trim()).filter(Boolean);
 
-  // Strategy 2: any standalone 2-letter word that is a valid state
-  const words = location.split(/[\s,.()\/—–-]+/);
-  for (const word of words) {
-    const upper = word.toUpperCase();
+  for (const token of tokens) {
+    const upper = token.toUpperCase();
     if (upper.length === 2 && US_STATES.has(upper)) {
-      console.log(`extractState: "${location}" → "${upper}" (word match)`);
+      console.log('extractState: "' + loc + '" -> "' + upper + '" (2-letter code)');
       return upper;
     }
+    const mapped = STATE_NAME_MAP[token.toLowerCase()];
+    if (mapped) {
+      console.log('extractState: "' + loc + '" -> "' + mapped + '" (name/abbr: "' + token + '")');
+      return mapped;
+    }
   }
 
-  console.log(`extractState: "${location}" → NO STATE FOUND`);
+  // Last resort: multi-word state names
+  const lower = loc.toLowerCase();
+  for (const [name, code] of Object.entries(STATE_NAME_MAP)) {
+    if (name.includes(' ') && lower.includes(name)) {
+      console.log('extractState: "' + loc + '" -> "' + code + '" (multi-word: "' + name + '")');
+      return code;
+    }
+  }
+
+  console.log('extractState: "' + loc + '" -> NO STATE FOUND');
   return null;
 }
 
