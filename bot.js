@@ -346,10 +346,75 @@ async function formatCalendar(events) {
 
 // ─── Program Snapshot Formatter ──────────────────────────────────────────────
 
-async function formatProgramSnapshot(events) {
-  if (!events || events.length === 0) {
-    return '📊 No games found.';
+// Known team name mappings for shortening
+const TEAM_SHORT_NAMES = {
+  'eastern illinois university baseball': 'EIU',
+  'illinois state university baseball': 'Illinois St',
+  'university of illinois baseball': 'Illinois',
+  'illini baseball': 'Illinois',
+  'university of minnesota baseball': 'Minnesota',
+  'north dakota state university baseball': 'NDSU',
+  'south dakota state university baseball': 'SDSU',
+  'university of iowa baseball': 'Iowa',
+  'iowa hawkeyes': 'Iowa',
+  'northwestern university baseball': 'Northwestern',
+  'northwestern baseball': 'Northwestern',
+  'uic baseball': 'UIC',
+  'university of illinois chicago baseball': 'UIC',
+  'southern illinois university baseball': 'SIU',
+  'siu edwardsville baseball': 'SIUE',
+  'southern illinois university - edwardsville baseball': 'SIUE',
+  'milwaukee athletics baseball': 'Milwaukee',
+  'university of wisconsin-milwaukee baseball': 'Milwaukee',
+  'university of nebraska baseball': 'Nebraska',
+  'iowa state university baseball': 'Iowa St',
+};
+
+function shortenOpponent(name) {
+  if (!name) return name;
+  const lower = name.toLowerCase().trim();
+  for (const [key, short] of Object.entries(TEAM_SHORT_NAMES)) {
+    if (lower.startsWith(key)) return short;
   }
+  return name
+    .replace(/\b(university of|university|college of|college)\b/gi, '')
+    .replace(/\bbaseball\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function shortenGameSummary(summary) {
+  if (!summary) return summary;
+
+  // Strip leading "Baseball - " prefix (Iowa Hawkeyes format)
+  let s = summary.replace(/^baseball\s*-+\s*/i, '').trim();
+
+  // Strip trailing event suffixes like "- FamILLy Day Friday"
+  s = s.replace(/\s+-\s+[^(]+$/, '').trim();
+
+  const lower = s.toLowerCase();
+
+  for (const [key, short] of Object.entries(TEAM_SHORT_NAMES)) {
+    if (lower.startsWith(key)) {
+      const remainder = s.slice(key.length).trim();
+      const atMatch = remainder.match(/^at\s+(.+)/i);
+      const vsMatch = remainder.match(/^vs\.?\s+(.+)/i);
+      if (atMatch) return short + ' at ' + shortenOpponent(atMatch[1]);
+      if (vsMatch) return short + ' vs ' + shortenOpponent(vsMatch[1]);
+      return short + ' ' + remainder;
+    }
+  }
+
+  // Fallback: strip common words
+  return s
+    .replace(/\b(university of|university|college of|college)\b/gi, '')
+    .replace(/\bbaseball\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+async function formatProgramSnapshot(events) {
+  if (!events || events.length === 0) return '📊 No games found.';
 
   const eventsByTeam = {};
 
@@ -369,21 +434,14 @@ async function formatProgramSnapshot(events) {
   let output = '📊 *Program Snapshot*\n───\n';
 
   for (const team of Object.keys(eventsByTeam).sort()) {
-    output += `• *${team}* — `;
-    const gameList = eventsByTeam[team].map((g) => {
-      let dayTime = '';
-      if (g.start.dateTime) {
-        const dayShort = new Date(g.start.dateTime).toLocaleDateString('en-US', { weekday: 'short', timeZone: CST });
-        const time = formatTimeCST(g.start.dateTime);
-        dayTime = `(${dayShort}/${time}) `;
-      } else if (g.start.date) {
-        const { dayShort } = formatDateCST(g.start.date);
-        dayTime = `(${dayShort}) `;
-      }
+    output += `\n• *${team}*\n`;
+    for (const g of eventsByTeam[team]) {
+      const dayShort = new Date(g.start.dateTime).toLocaleDateString('en-US', { weekday: 'short', timeZone: CST });
+      const time = formatTimeCST(g.start.dateTime);
+      const shortName = shortenGameSummary(g.summary);
       const location = g.location ? ` (${g.location})` : '';
-      return `${dayTime}${g.summary}${location}`;
-    }).join('; ');
-    output += `${gameList}\n`;
+      output += `  ${dayShort}/${time} — ${shortName}${location}\n`;
+    }
   }
 
   return output;
