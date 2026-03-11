@@ -311,13 +311,16 @@ const TEAM_SHORT_NAMES = {
   'northwestern baseball': 'Northwestern',
   'uic baseball': 'UIC',
   'university of illinois chicago baseball': 'UIC',
-  'southern illinois university baseball': 'SIU',
-  'siu edwardsville baseball': 'SIUE',
   'southern illinois university - edwardsville baseball': 'SIUE',
+  'siue baseball': 'SIUE',
+  'siu edwardsville baseball': 'SIUE',
+  'southern illinois university baseball': 'SIU',
   'milwaukee athletics baseball': 'Milwaukee',
   'university of wisconsin-milwaukee baseball': 'Milwaukee',
   'university of nebraska baseball': 'Nebraska',
   'iowa state university baseball': 'Iowa St',
+  'western illinois university baseball': 'WIU',
+  'indiana state university baseball': 'Indiana St',
 };
 
 function shortenOpponent(name) {
@@ -333,36 +336,55 @@ function shortenOpponent(name) {
     .trim();
 }
 
-function shortenGameSummary(summary) {
-  if (!summary) return summary;
+// Parse a game title into a clean "Visitor at Home" format
+// Returns { display, showLocation }
+function parseGameTitle(summary) {
+  if (!summary) return { display: summary, showLocation: true };
 
-  // Strip leading "Baseball - " prefix (Iowa Hawkeyes format)
-  let s = summary.replace(/^baseball\s*-+\s*/i, '').trim();
+  // Pre-process SIUE — normalize before lookup
+  let s = summary.replace(/southern illinois university\s*-\s*edwardsville baseball/gi, 'SIUE Baseball');
+
+  // Strip leading "Baseball - " prefix (Iowa Hawkeyes calendar format)
+  s = s.replace(/^baseball\s*-+\s*/i, '').trim();
 
   // Strip trailing event suffixes like "- FamILLy Day Friday"
   s = s.replace(/\s+-\s+[^(]+$/, '').trim();
 
   const lower = s.toLowerCase();
 
+  let subjectShort = null;
+  let remainder = s;
+
   for (const [key, short] of Object.entries(TEAM_SHORT_NAMES)) {
     if (lower.startsWith(key)) {
-      const remainder = s.slice(key.length).trim();
-      const atMatch = remainder.match(/^at\s+(.+)/i);
-      const vsMatch = remainder.match(/^vs\.?\s+(.+)/i);
-      if (atMatch) return short + ' at ' + shortenOpponent(atMatch[1]);
-      if (vsMatch) return short + ' vs ' + shortenOpponent(vsMatch[1]);
-      return short + ' ' + remainder;
+      subjectShort = short;
+      remainder = s.slice(key.length).trim();
+      break;
     }
   }
 
-  // Fallback: strip common words
-  return s
-    .replace(/\b(university of|university|college of|college)\b/gi, '')
-    .replace(/\bbaseball\b/gi, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  if (!subjectShort) {
+    subjectShort = shortenOpponent(s.split(/\s+at\s+|\s+vs\.?\s+/i)[0]);
+  }
+
+  const atMatch = remainder.match(/^at\s+(.+)/i);
+  const vsMatch = remainder.match(/^vs\.?\s+(.+)/i);
+
+  if (atMatch) {
+    // Away game — "Visitor at Host", no location needed
+    return { display: `${subjectShort} at ${shortenOpponent(atMatch[1])}`, showLocation: false };
+  } else if (vsMatch) {
+    // Home game — flip to "Visitor at Home", no location needed
+    return { display: `${shortenOpponent(vsMatch[1])} at ${subjectShort}`, showLocation: false };
+  }
+
+  return { display: subjectShort || s, showLocation: true };
 }
 
+// Legacy wrapper used by game_states (no location suppression needed there)
+function shortenGameSummary(summary) {
+  return parseGameTitle(summary).display;
+}
 
 // ─── Calendar Formatter ──────────────────────────────────────────────────────
 
@@ -418,10 +440,12 @@ async function formatCalendar(events) {
 
       if (event.start.dateTime) {
         timeStr += formatTimeCST(event.start.dateTime);
-        const shortName = shortenGameSummary(event.summary);
-        timeStr += ` — ${shortName}`;
-        const loc = cleanLocation(event.location);
-        if (loc) timeStr += ` (${loc})`;
+        const { display: line, showLocation } = parseGameTitle(event.summary);
+        timeStr += ` — ${line}`;
+        if (showLocation) {
+          const loc = cleanLocation(event.location);
+          if (loc) timeStr += ` (${loc})`;
+        }
         const weatherTag = await getWeatherTag(event);
         timeStr += weatherTag;
       } else if (isBirthday) {
@@ -467,9 +491,9 @@ async function formatProgramSnapshot(events) {
     for (const g of eventsByTeam[team]) {
       const dayShort = new Date(g.start.dateTime).toLocaleDateString('en-US', { weekday: 'short', timeZone: CST });
       const time = formatTimeCST(g.start.dateTime);
-      const shortName = shortenGameSummary(g.summary);
-      const location = g.location ? ` (${g.location})` : '';
-      output += `  ${dayShort}/${time} — ${shortName}${location}\n`;
+      const { display: line, showLocation } = parseGameTitle(g.summary);
+      const location = showLocation && g.location ? ` (${cleanLocation(g.location)})` : '';
+      output += `  ${dayShort}/${time} — ${line}${location}\n`;
     }
   }
 
@@ -756,7 +780,9 @@ async function formatGameStates(events) {
     for (const g of games) {
       const dayShort = new Date(g.start.dateTime).toLocaleDateString('en-US', { weekday: 'short', timeZone: CST });
       const time = formatTimeCST(g.start.dateTime);
-      output += `• ${dayShort}/${time} — ${g.summary} (${g.location})\n`;
+      const { display: gsLine, showLocation: gsShowLoc } = parseGameTitle(g.summary);
+      const gsLoc = gsShowLoc ? ` (${cleanLocation(g.location) || g.location})` : '';
+      output += `• ${dayShort}/${time} — ${gsLine}${gsLoc}\n`;
     }
   }
 
