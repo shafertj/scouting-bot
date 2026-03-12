@@ -12,6 +12,7 @@
     "node-telegram-bot-api": "^0.63.0",
     "googleapis": "^118.0.0",
     "google-auth-library": "^9.4.1",
+    "xlsx": "^0.18.5",
     "@google-cloud/local-auth": "^2.1.1",
     "cheerio": "^1.0.0-rc.12",
     "axios": "^1.6.2",
