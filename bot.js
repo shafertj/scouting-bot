@@ -831,7 +831,6 @@ bot.onText(/\/espn_scores(?:\s(.+))?/, async (msg, match) => {
 // ─── Stats Query (Drive + Claude) ────────────────────────────────────────────
 
 const DRIVE_FOLDER_ID = process.env.DRIVE_FOLDER_ID;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
 async function getStatsFile() {
   if (!DRIVE_FOLDER_ID) throw new Error('DRIVE_FOLDER_ID not set in environment variables.');
