@@ -391,6 +391,30 @@ function shortenGameSummary(summary) {
   return parseGameTitle(summary).display;
 }
 
+// Make a game line relative to the program it appears under in the snapshot
+// "Iowa at Penn State" under Iowa Baseball → "at Penn State"
+// "Western Illinois at Illinois St" under Illinois St Baseball → "vs. Western Illinois"
+function relativeGameLine(display, calendarShort) {
+  if (!display || !calendarShort) return display;
+  const atMatch = display.match(/^(.+?)\s+at\s+(.+)$/i);
+  if (atMatch) {
+    if (atMatch[1].trim() === calendarShort) return `at ${atMatch[2].trim()}`;
+    if (atMatch[2].trim() === calendarShort) return `vs. ${atMatch[1].trim()}`;
+  }
+  return display;
+}
+
+// Extract short name from a calendar name like "EIU Baseball" → "EIU"
+function calendarNameToShort(calendarName) {
+  if (!calendarName) return null;
+  const lower = calendarName.toLowerCase();
+  for (const [key, short] of Object.entries(TEAM_SHORT_NAMES)) {
+    if (lower.startsWith(key)) return short;
+  }
+  // Fallback: strip "Baseball" suffix
+  return calendarName.replace(/\s*baseball\s*/i, '').trim();
+}
+
 // ─── Calendar Formatter ──────────────────────────────────────────────────────
 
 // Clean up location strings — strip leading comma/space from blank city
@@ -493,10 +517,12 @@ async function formatProgramSnapshot(events) {
 
   for (const team of Object.keys(eventsByTeam).sort()) {
     output += `\n• *${team}*\n`;
+    const calShort = calendarNameToShort(team);
     for (const g of eventsByTeam[team]) {
       const dayShort = new Date(g.start.dateTime).toLocaleDateString('en-US', { weekday: 'short', timeZone: CST });
       const time = formatTimeCST(g.start.dateTime);
-      const { display: line, showLocation } = parseGameTitle(g.summary);
+      const { display, showLocation } = parseGameTitle(g.summary);
+      const line = relativeGameLine(display, calShort);
       const location = showLocation && g.location ? ` (${cleanLocation(g.location)})` : '';
       output += `  ${dayShort}/${time} — ${line}${location}\n`;
     }
@@ -898,7 +924,7 @@ async function queryStatsWithClaude(question, sheets) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1024,
-      system: `You are a baseball scouting assistant. You have access to a scouting stats spreadsheet with multiple tabs — each tab represents a team's hitters or pitchers. Answer the user's question using only the data provided. Be concise and direct. Format your answer clearly for a Telegram message — use plain text, no markdown. If ranking players, use a numbered list. Always include the player name, team, and relevant stat(s).`,
+      system: `You are a baseball scouting assistant. You have access to a scouting stats spreadsheet with multiple tabs — each tab represents a team's hitters or pitchers. Answer the user's question using only the data provided. Be concise and direct. Format your answer clearly for a Telegram message — use plain text, no markdown. If ranking players, use a numbered list and sort numerically — highest to lowest for offensive stats (BA, OBP, SLG, OPS, HR, RBI), lowest to highest for pitching stats (ERA, WHIP). Always include the player name, team, and the relevant stat value. Apply any minimum thresholds strictly before ranking.`,
       messages: [
         {
           role: 'user',
