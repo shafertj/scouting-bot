@@ -198,8 +198,12 @@ async function getWeatherForLocation(location) {
 
   try {
     const geoUrl = `https://api.openweathermap.org/geo/1.0/direct?q=${encodeURIComponent(location)}&limit=1&appid=${OPENWEATHER_API_KEY}`;
-    const geoRes = await axios.get(geoUrl, { timeout: 5000 });
-    if (!geoRes.data || geoRes.data.length === 0) return null;
+    const geoRes = await axios.get(geoUrl, { timeout: 3000 });
+    if (!geoRes.data || geoRes.data.length === 0) {
+      // Cache the null result so we don't retry the same bad location
+      weatherCache[cacheKey] = { data: null, fetchedAt: Date.now() };
+      return null;
+    }
 
     const { lat, lon } = geoRes.data[0];
     const weatherUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${OPENWEATHER_API_KEY}&units=imperial&cnt=40`;
@@ -233,7 +237,10 @@ function getForecastForTime(forecasts, dateTimeStr) {
 async function getWeatherTag(event) {
   if (!event.start.dateTime || !event.location) return '';
   try {
-    const locationStr = event.location.split('—').pop().trim(); // use city portion if "Venue — City, ST"
+    // Clean location before geocoding — skip if blank or too short after stripping
+    const rawLocation = event.location.split('—').pop().trim();
+    const locationStr = rawLocation.replace(/^[,\s]+/, '').trim();
+    if (!locationStr || locationStr.length < 3) return '';
     const weatherData = await getWeatherForLocation(locationStr);
     if (!weatherData) return '';
 
