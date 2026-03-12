@@ -21,7 +21,10 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
 const OAUTH_CREDENTIALS_JSON = process.env.OAUTH_CREDENTIALS || fs.readFileSync(path.join(__dirname, 'credentials.json'), 'utf8');
 const TOKEN_PATH = path.join(__dirname, 'token.json');
-const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/drive.readonly',
+];
 
 // Initialize Anthropic
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY });
@@ -87,13 +90,15 @@ async function authorize() {
 }
 
 let calendar;
+let drive;
 let auth;
 
 async function initializeGoogleCalendar() {
   try {
     auth = await authorize();
     calendar = google.calendar({ version: 'v3', auth });
-    console.log('✓ Google Calendar API initialized with OAuth');
+    drive = google.drive({ version: 'v3', auth });
+    console.log('✓ Google Calendar + Drive APIs initialized with OAuth');
   } catch (error) {
     console.error('✗ Failed to initialize Google Calendar:', error.message);
     process.exit(1);
@@ -623,6 +628,11 @@ const HELP_TEXT = [
   '/game_states — Games grouped by state (3 days)',
   '/game_states +N — N days',
   '',
+  '🔍 Stats Query',
+  '/stats [question] — Query player stats from scouting sheet',
+  '/stats top 5 Iowa hitters by BA',
+  '/stats ERA leaders across all programs',
+  '',
   '📊 Scores',
   '/espn_scores — Today\'s NCAA scores',
   '/espn_scores YYYY-MM-DD — Specific date',
@@ -816,6 +826,119 @@ bot.onText(/\/espn_scores(?:\s(.+))?/, async (msg, match) => {
 });
 
 // ─── Cron ─────────────────────────────────────────────────────────────────────
+
+
+// ─── Stats Query (Drive + Claude) ────────────────────────────────────────────
+
+const DRIVE_FOLDER_ID = process.env.DRIVE_FOLDER_ID;
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+
+async function getStatsFile() {
+  if (!DRIVE_FOLDER_ID) throw new Error('DRIVE_FOLDER_ID not set in environment variables.');
+
+  // Find the Excel file in the folder
+  const res = await drive.files.list({
+    q: `'${DRIVE_FOLDER_ID}' in parents and trashed = false`,
+    fields: 'files(id, name, mimeType)',
+    orderBy: 'modifiedTime desc',
+    pageSize: 10,
+  });
+
+  const files = res.data.files;
+  if (!files || files.length === 0) throw new Error('No files found in DRIVE_FOLDER_ID folder.');
+
+  // Prefer xlsx files
+  const xlsxFile = files.find(f => f.name.endsWith('.xlsx') || f.name.endsWith('.xls'));
+  const target = xlsxFile || files[0];
+  console.log(`📂 Found stats file: ${target.name} (${target.id})`);
+
+  // Download the file as buffer
+  const fileRes = await drive.files.get(
+    { fileId: target.id, alt: 'media' },
+    { responseType: 'arraybuffer' }
+  );
+
+  return { buffer: Buffer.from(fileRes.data), name: target.name };
+}
+
+async function parseStatsSheets(buffer) {
+  const XLSX = await import('xlsx');
+  const workbook = XLSX.read(buffer, { type: 'buffer' });
+
+  const sheets = {};
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    const csv = XLSX.utils.sheet_to_csv(sheet, { skipHidden: true });
+    // Only include non-empty sheets
+    if (csv.trim().length > 10) {
+      sheets[sheetName] = csv;
+    }
+  }
+  return sheets;
+}
+
+async function queryStatsWithClaude(question, sheets) {
+  // Build a compact representation of all sheet data
+  const sheetSummary = Object.entries(sheets)
+    .map(([name, csv]) => `=== ${name} ===\n${csv}`)
+    .join('\n\n');
+
+  // Limit total size to avoid token overload — truncate if massive
+  const MAX_CHARS = 80000;
+  const truncated = sheetSummary.length > MAX_CHARS
+    ? sheetSummary.slice(0, MAX_CHARS) + '\n\n[Data truncated due to size]'
+    : sheetSummary;
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: `You are a baseball scouting assistant. You have access to a scouting stats spreadsheet with multiple tabs — each tab represents a team's hitters or pitchers. Answer the user's question using only the data provided. Be concise and direct. Format your answer clearly for a Telegram message — use plain text, no markdown. If ranking players, use a numbered list. Always include the player name, team, and relevant stat(s).`,
+      messages: [
+        {
+          role: 'user',
+          content: `Here is the scouting stats data:\n\n${truncated}\n\nQuestion: ${question}`,
+        },
+      ],
+    }),
+  });
+
+  const data = await response.json();
+  if (data.error) throw new Error(`Claude API error: ${data.error.message}`);
+  return data.content[0].text;
+}
+
+bot.onText(/\/stats(?:\s+(.+))?$/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const question = match[1] ? match[1].trim() : null;
+
+  if (!question) {
+    return bot.sendMessage(chatId, '❓ Please include a question.\nExample: /stats top 5 Iowa hitters by BA');
+  }
+
+  try {
+    await bot.sendMessage(chatId, '🔍 Fetching stats and querying...');
+    console.log(`📊 /stats query: "${question}"`);
+
+    const { buffer, name } = await getStatsFile();
+    console.log(`✓ Downloaded: ${name}`);
+
+    const sheets = await parseStatsSheets(buffer);
+    console.log(`✓ Parsed ${Object.keys(sheets).length} sheets`);
+
+    const answer = await queryStatsWithClaude(question, sheets);
+    await sendChunked(chatId, answer);
+  } catch (error) {
+    console.error('✗ /stats error:', error.message);
+    await bot.sendMessage(chatId, `❌ Stats query failed: ${error.message}`);
+  }
+});
 
 // 7 AM Central daily
 cron.schedule('0 12 * * *', () => {
