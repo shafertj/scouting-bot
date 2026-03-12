@@ -655,9 +655,10 @@ const HELP_TEXT = [
   '/game_states +N — N days',
   '',
   '🔍 Stats Query',
-  '/stats [question] — Query player stats from scouting sheet',
+  '/stats [question] — Fast query via Haiku (simple ranking)',
+  '/statsplus [question] — Deep query via Sonnet (derived stats, cross-team)',
   '/stats top 5 Iowa hitters by BA',
-  '/stats ERA leaders across all programs',
+  '/statsplus BB% leaders all D1 pitchers min 20 IP',
   '',
   '📊 Scores',
   '/espn_scores — Today\'s NCAA scores',
@@ -964,7 +965,7 @@ function filterStatSheets(question, sheets) {
   return count > 0 ? filtered : sheets;
 }
 
-async function queryStatsWithClaude(question, sheets) {
+async function queryStatsWithClaude(question, sheets, model = 'claude-haiku-4-5-20251001') {
   // Pre-filter tabs based on team/division mentioned in question
   const filteredSheets = filterStatSheets(question, sheets);
   const tabCount = Object.keys(filteredSheets).length;
@@ -990,7 +991,7 @@ async function queryStatsWithClaude(question, sheets) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: model,
       max_tokens: 1024,
       system: `You are a baseball scouting assistant. You have access to a scouting stats spreadsheet with multiple tabs — each tab represents a team's hitters or pitchers. Each tab name indicates the team, division (D1, D2, or JC), and type (hitters or pitchers). Determine a player's division strictly from the tab name only — never use your own knowledge of a school's division classification. Answer the user's question using only the data provided. Be concise and direct. Format your answer clearly for a Telegram message — use plain text, no markdown. If ranking players, use a numbered list and sort numerically — highest to lowest for offensive stats (BA, OBP, SLG, OPS, HR, RBI, BB%), lowest to highest for pitching stats (ERA, WHIP, BB%). Always include the player name, team, and the relevant stat value. If a stat is not a column, calculate it from available columns. Apply any minimum thresholds strictly before ranking.`,
       messages: [
@@ -1007,17 +1008,11 @@ async function queryStatsWithClaude(question, sheets) {
   return data.content[0].text;
 }
 
-bot.onText(/\/stats(?:\s+(.+))?$/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  const question = match[1] ? match[1].trim() : null;
-
-  if (!question) {
-    return bot.sendMessage(chatId, '❓ Please include a question.\nExample: /stats top 5 Iowa hitters by BA');
-  }
-
+async function handleStatsQuery(chatId, question, model) {
+  const modelLabel = model.includes('haiku') ? 'Haiku' : 'Sonnet';
   try {
-    await bot.sendMessage(chatId, '🔍 Fetching stats and querying...');
-    console.log(`📊 /stats query: "${question}"`);
+    await bot.sendMessage(chatId, `🔍 Fetching stats and querying (${modelLabel})...`);
+    console.log(`📊 /stats query [${modelLabel}]: "${question}"`);
 
     const { buffer, name } = await getStatsFile();
     console.log(`✓ Downloaded: ${name}`);
@@ -1025,12 +1020,32 @@ bot.onText(/\/stats(?:\s+(.+))?$/, async (msg, match) => {
     const sheets = await parseStatsSheets(buffer);
     console.log(`✓ Parsed ${Object.keys(sheets).length} sheets`);
 
-    const answer = await queryStatsWithClaude(question, sheets);
+    const answer = await queryStatsWithClaude(question, sheets, model);
     await sendChunked(chatId, answer);
   } catch (error) {
-    console.error('✗ /stats error:', error.message);
+    console.error(`✗ /stats error:`, error.message);
     await bot.sendMessage(chatId, `❌ Stats query failed: ${error.message}`);
   }
+}
+
+// /stats — Haiku (fast, low cost, simple ranking queries)
+bot.onText(/\/stats(?:\s+(.+))?$/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const question = match[1] ? match[1].trim() : null;
+  if (!question) {
+    return bot.sendMessage(chatId, '❓ Please include a question.\nExample: /stats top 5 Iowa hitters by BA');
+  }
+  await handleStatsQuery(chatId, question, 'claude-haiku-4-5-20251001');
+});
+
+// /statsplus — Sonnet (complex queries, derived stats, cross-team analysis)
+bot.onText(/\/statsplus(?:\s+(.+))?$/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const question = match[1] ? match[1].trim() : null;
+  if (!question) {
+    return bot.sendMessage(chatId, '❓ Please include a question.\nExample: /statsplus BB% leaders across all D1 pitchers minimum 20 innings');
+  }
+  await handleStatsQuery(chatId, question, 'claude-sonnet-4-20250514');
 });
 
 // 7 AM Central daily
