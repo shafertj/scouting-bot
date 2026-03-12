@@ -902,13 +902,81 @@ async function parseStatsSheets(buffer) {
   return sheets;
 }
 
+// Team keyword → short name mapping for tab pre-filtering
+const STATS_TEAM_KEYWORDS = [
+  ['siu edwardsville', 'SIUE'], ['siue', 'SIUE'],
+  ['eastern illinois', 'EIU'], ['eiu', 'EIU'],
+  ['illinois state', 'Illinois St'], ['illinois st', 'Illinois St'],
+  ['iowa state', 'Iowa St'], ['iowa st', 'Iowa St'],
+  ['minnesota state', 'Minnesota St'], ['minnesota st', 'Minnesota St'],
+  ['north dakota state', 'NDSU'], ['ndsu', 'NDSU'],
+  ['south dakota state', 'SDSU'], ['sdsu', 'SDSU'],
+  ['western illinois', 'WIU'], ['wiu', 'WIU'],
+  ['indiana state', 'Indiana St'], ['indiana st', 'Indiana St'],
+  ['northwestern', 'Northwestern'],
+  ['illini', 'Illinois'], ['university of illinois', 'Illinois'],
+  ['milwaukee', 'Milwaukee'],
+  ['nebraska', 'Nebraska'],
+  ['minnesota', 'Minnesota'],
+  ['illinois', 'Illinois'],
+  ['iowa', 'Iowa'],
+  ['uic', 'UIC'],
+  ['siu', 'SIU'],
+];
+
+const STATS_DIVISION_KEYWORDS = [
+  ['junior college', 'JC'], ['juco', 'JC'], ['jc', 'JC'],
+  ['division 1', 'D1'], ['d1', 'D1'],
+  ['division 2', 'D2'], ['d2', 'D2'],
+];
+
+function filterStatSheets(question, sheets) {
+  const q = question.toLowerCase();
+  const allSheetNames = Object.keys(sheets);
+
+  let divFilter = null;
+  for (const [kw, div] of STATS_DIVISION_KEYWORDS) {
+    if (q.includes(kw)) { divFilter = div; break; }
+  }
+
+  let teamFilter = null;
+  for (const [kw, short] of STATS_TEAM_KEYWORDS) {
+    if (q.includes(kw)) { teamFilter = short; break; }
+  }
+
+  if (!teamFilter && !divFilter) {
+    console.log('📊 No team/division filter — sending all tabs');
+    return sheets;
+  }
+
+  const filtered = {};
+  for (const name of allSheetNames) {
+    const nameLower = name.toLowerCase();
+    const teamMatch = !teamFilter || nameLower.includes(teamFilter.toLowerCase());
+    const divMatch = !divFilter || nameLower.includes(divFilter.toLowerCase());
+    if (teamMatch && divMatch) filtered[name] = sheets[name];
+  }
+
+  const count = Object.keys(filtered).length;
+  console.log(`📊 Filter: team=${teamFilter || 'any'}, div=${divFilter || 'any'} → ${count} tab(s)`);
+
+  // Fallback to all tabs if filter matched nothing
+  return count > 0 ? filtered : sheets;
+}
+
 async function queryStatsWithClaude(question, sheets) {
-  // Build a compact representation of all sheet data
-  const sheetSummary = Object.entries(sheets)
+  // Pre-filter tabs based on team/division mentioned in question
+  const filteredSheets = filterStatSheets(question, sheets);
+  const tabCount = Object.keys(filteredSheets).length;
+  const totalCount = Object.keys(sheets).length;
+  if (tabCount < totalCount) {
+    console.log(`📊 Sending ${tabCount}/${totalCount} tabs to Claude`);
+  }
+
+  const sheetSummary = Object.entries(filteredSheets)
     .map(([name, csv]) => `=== ${name} ===\n${csv}`)
     .join('\n\n');
 
-  // Limit total size to avoid token overload — truncate if massive
   const MAX_CHARS = 80000;
   const truncated = sheetSummary.length > MAX_CHARS
     ? sheetSummary.slice(0, MAX_CHARS) + '\n\n[Data truncated due to size]'
@@ -924,7 +992,7 @@ async function queryStatsWithClaude(question, sheets) {
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1024,
-      system: `You are a baseball scouting assistant. You have access to a scouting stats spreadsheet with multiple tabs — each tab represents a team's hitters or pitchers. Answer the user's question using only the data provided. Be concise and direct. Format your answer clearly for a Telegram message — use plain text, no markdown. If ranking players, use a numbered list and sort numerically — highest to lowest for offensive stats (BA, OBP, SLG, OPS, HR, RBI), lowest to highest for pitching stats (ERA, WHIP). Always include the player name, team, and the relevant stat value. Apply any minimum thresholds strictly before ranking.`,
+      system: `You are a baseball scouting assistant. You have access to a scouting stats spreadsheet with multiple tabs — each tab represents a team's hitters or pitchers. Each tab name indicates the team, division (D1, D2, or JC), and type (hitters or pitchers). Determine a player's division strictly from the tab name only — never use your own knowledge of a school's division classification. Answer the user's question using only the data provided. Be concise and direct. Format your answer clearly for a Telegram message — use plain text, no markdown. If ranking players, use a numbered list and sort numerically — highest to lowest for offensive stats (BA, OBP, SLG, OPS, HR, RBI, BB%), lowest to highest for pitching stats (ERA, WHIP, BB%). Always include the player name, team, and the relevant stat value. If a stat is not a column, calculate it from available columns. Apply any minimum thresholds strictly before ranking.`,
       messages: [
         {
           role: 'user',
