@@ -558,7 +558,6 @@ const NCAA_TEAM_MAP = {
   'UIC': 'UIC',
   'Bradley': 'Bradley',
   'NIU': 'NIU',
-  'Indiana St.': 'Indiana St',
   'St. Thomas (MN)': 'St. Thomas',
 };
 
@@ -582,14 +581,14 @@ function formatScoreLine(g) {
   const homeDisplay = displayName(home);
 
   if (state === 'final') {
-    // Bold the winner
+    // Skip games with missing scores
+    if (!awayScore || !homeScore) return null;
     const awayBold = g.away?.winner ? `*${awayDisplay}*` : awayDisplay;
     const homeBold = g.home?.winner ? `*${homeDisplay}*` : homeDisplay;
-    return `${awayBold} ${awayScore}, ${homeBold} ${homeScore} — FINAL`;
+    return `${awayBold} ${awayScore}, ${homeBold} ${homeScore}`;
   } else if (state === 'live') {
-    return `${awayDisplay} ${awayScore}, ${homeDisplay} ${homeScore} — LIVE (${period})`;
+    return `${awayDisplay} ${awayScore}, ${homeDisplay} ${homeScore} — ${period}`;
   } else {
-    // Scheduled — show time
     const time = g.startTime || 'TBA';
     return `${awayDisplay} vs ${homeDisplay} — ${time}`;
   }
@@ -649,7 +648,7 @@ async function fetchNcaaScores(division = 'd1', dateStr = null) {
       if (group.length > 0) {
         const label = state === 'final' ? 'FINAL' : state === 'live' ? 'LIVE' : 'SCHEDULED';
         output += `\n${label}\n`;
-        group.forEach(g => { output += `  ${formatScoreLine(g)}\n`; });
+        group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
       }
     }
   }
@@ -662,7 +661,7 @@ async function fetchNcaaScores(division = 'd1', dateStr = null) {
       if (group.length > 0) {
         const label = state === 'final' ? 'FINAL' : state === 'live' ? 'LIVE' : 'SCHEDULED';
         output += `\n${label}\n`;
-        group.forEach(g => { output += `  ${formatScoreLine(g)}\n`; });
+        group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
       }
     }
   }
