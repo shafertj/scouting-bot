@@ -1061,38 +1061,31 @@ bot.onText(/\/statsplus(?:\s+(.+))?$/, async (msg, match) => {
 bot.onText(/\/scoretest/, async (msg) => {
   const chatId = msg.chat.id;
   try {
-    await bot.sendMessage(chatId, '🔍 Testing multiple NCAA endpoints...');
+    await bot.sendMessage(chatId, '🔍 Drilling into NCAA API game structure...');
 
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
 
-    const urls = [
-      `https://data.ncaa.com/casablanca/scoreboard/baseball/d1/${yyyy}/${mm}/${dd}/scoreboard.json`,
-      `https://ncaa-api.henrygd.me/scoreboard/baseball/d1/${yyyy}/${mm}/${dd}/all-conf`,
-      `https://site.api.espn.com/apis/site/v2/sports/baseball/college-baseball/scoreboard?dates=${yyyy}${mm}${dd}`,
-      `https://site.web.api.espn.com/apis/site/v2/sports/baseball/college-baseball/scoreboard?dates=${yyyy}${mm}${dd}`,
-    ];
+    const url = `https://ncaa-api.henrygd.me/scoreboard/baseball/d1/${yyyy}/${mm}/${dd}/all-conf`;
+    const res = await axios.get(url, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
 
-    const results = [];
-    for (const url of urls) {
-      try {
-        const res = await axios.get(url, {
-          timeout: 6000,
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-        });
-        const keys = Object.keys(res.data || {}).join(', ');
-        const gameCount = res.data?.games?.length || res.data?.events?.length || '?';
-        results.push(`✅ ${url}\nKeys: ${keys}\nGames: ${gameCount}`);
-      } catch (err) {
-        results.push(`❌ ${url}\n${err.message}`);
-      }
+    const games = res.data?.games || [];
+    if (games.length === 0) {
+      await bot.sendMessage(chatId, '⚠ No games found today.');
+      return;
     }
 
-    await sendChunked(chatId, results.join('\n\n'));
+    // Show first 3 games with full structure
+    const sample = games.slice(0, 3).map(g => JSON.stringify(g, null, 2)).join('\n\n---\n\n');
+    await sendChunked(chatId, `Total games: ${games.length}\n\nFirst 3 raw:\n${sample}`);
+
   } catch (err) {
-    await bot.sendMessage(chatId, `❌ Test failed: ${err.message}`);
+    await bot.sendMessage(chatId, `❌ Failed: ${err.message}`);
   }
 });
 
