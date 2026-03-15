@@ -1055,6 +1055,45 @@ bot.onText(/\/statsplus(?:\s+(.+))?$/, async (msg, match) => {
   await handleStatsQuery(chatId, question, 'claude-sonnet-4-20250514');
 });
 
+
+// ─── Score Test (temporary) ──────────────────────────────────────────────────
+
+bot.onText(/\/scoretest/, async (msg) => {
+  const chatId = msg.chat.id;
+  try {
+    await bot.sendMessage(chatId, '🔍 Testing NCAA scoreboard endpoint...');
+
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}/${mm}/${dd}`;
+
+    const url = `https://data.ncaa.com/casablanca/scoreboard/baseball/d1/${dateStr}/scoreboard.json`;
+    console.log(`🔍 Fetching: ${url}`);
+
+    const res = await axios.get(url, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+
+    const data = res.data;
+    const gameCount = data?.games?.length || 0;
+
+    if (gameCount === 0) {
+      await bot.sendMessage(chatId, `✅ Endpoint responded but no games found for ${yyyy}-${mm}-${dd}.\n\nRaw keys: ${Object.keys(data).join(', ')}`);
+      return;
+    }
+
+    // Show first 2 games raw so we can see the structure
+    const sample = data.games.slice(0, 2).map(g => JSON.stringify(g, null, 2)).join('\n\n');
+    await sendChunked(chatId, `✅ Found ${gameCount} games!\n\nSample (first 2):\n${sample}`);
+
+  } catch (err) {
+    await bot.sendMessage(chatId, `❌ Failed: ${err.message}\n\nURL tried: https://data.ncaa.com/casablanca/scoreboard/baseball/d1/YYYY/MM/DD/scoreboard.json`);
+  }
+});
+
 // 7 AM Central daily
 cron.schedule('0 12 * * *', () => {
   console.log('⏰ Running scheduled calendar chron...');
