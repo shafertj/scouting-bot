@@ -1061,28 +1061,60 @@ bot.onText(/\/statsplus(?:\s+(.+))?$/, async (msg, match) => {
 bot.onText(/\/scoretest/, async (msg) => {
   const chatId = msg.chat.id;
   try {
-    await bot.sendMessage(chatId, '🔍 Drilling into NCAA API game structure...');
+    await bot.sendMessage(chatId, '🔍 Searching all divisions for your coverage teams...');
 
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
 
-    const url = `https://ncaa-api.henrygd.me/scoreboard/baseball/d1/${yyyy}/${mm}/${dd}/all-conf`;
-    const res = await axios.get(url, {
-      timeout: 8000,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
+    // Coverage team keywords to search for
+    const coverageKeywords = [
+      'north dakota', 'uic', 'southern ill', 'eastern illinois',
+      'northwestern', 'milwaukee', 'iowa', 'illinois', 'minnesota',
+      'siue', 'siu edwardsville', 'south dakota', 'bradley',
+      'northern illinois', 'niu', 'st. thomas', 'western ill',
+      'indiana st', 'illinois st'
+    ];
 
-    const games = res.data?.games || [];
-    if (games.length === 0) {
-      await bot.sendMessage(chatId, '⚠ No games found today.');
-      return;
+    const divisions = ['d1', 'd2', 'd3'];
+    const allMatches = [];
+    const divSummary = [];
+
+    for (const div of divisions) {
+      try {
+        const url = `https://ncaa-api.henrygd.me/scoreboard/baseball/${div}/${yyyy}/${mm}/${dd}/all-conf`;
+        const res = await axios.get(url, {
+          timeout: 8000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+        const games = res.data?.games || [];
+        divSummary.push(`${div.toUpperCase()}: ${games.length} games`);
+
+        for (const g of games) {
+          const away = g.game?.away?.names?.short || '';
+          const home = g.game?.home?.names?.short || '';
+          const awayFull = g.game?.away?.names?.full || '';
+          const homeFull = g.game?.home?.names?.full || '';
+
+          const bothNames = `${away} ${home} ${awayFull} ${homeFull}`.toLowerCase();
+          const matched = coverageKeywords.some(kw => bothNames.includes(kw));
+
+          if (matched) {
+            allMatches.push(`[${div.toUpperCase()}] ${away} vs ${home}`);
+          }
+        }
+      } catch (err) {
+        divSummary.push(`${div.toUpperCase()}: failed (${err.message})`);
+      }
     }
 
-    // Show first 3 games with full structure
-    const sample = games.slice(0, 3).map(g => JSON.stringify(g, null, 2)).join('\n\n---\n\n');
-    await sendChunked(chatId, `Total games: ${games.length}\n\nFirst 3 raw:\n${sample}`);
+    const summary = divSummary.join('\n');
+    const matches = allMatches.length > 0
+      ? allMatches.join('\n')
+      : 'No coverage team matches found today';
+
+    await sendChunked(chatId, `📊 Division totals:\n${summary}\n\n🎯 Coverage team matches:\n${matches}`);
 
   } catch (err) {
     await bot.sendMessage(chatId, `❌ Failed: ${err.message}`);
