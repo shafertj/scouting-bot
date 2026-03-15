@@ -538,62 +538,136 @@ async function formatProgramSnapshot(events) {
   return output;
 }
 
-// ─── ESPN/NCAA Scores ─────────────────────────────────────────────────────────
+// ─── NCAA Scores ─────────────────────────────────────────────────────────────
 
-async function espnScores(dateStr = null) {
-  try {
-    let targetDate;
-    if (!dateStr) {
-      targetDate = new Date();
-    } else {
-      targetDate = new Date(dateStr);
-      if (isNaN(targetDate)) {
-        return '❌ Invalid date format. Use YYYY-MM-DD (e.g., 2026-03-08)';
-      }
-    }
+// Exact team name mappings from NCAA API → your coverage teams
+// Key: what the NCAA API returns, Value: your display name
+const NCAA_TEAM_MAP = {
+  'North Dakota St.': 'NDSU',
+  'South Dakota St.': 'SDSU',
+  'Illinois St.': 'Illinois St',
+  'Western Ill.': 'WIU',
+  'Southern Ill.': 'SIU',
+  'Eastern Illinois': 'EIU',
+  'Northwestern': 'Northwestern',
+  'Milwaukee': 'Milwaukee',
+  'Iowa': 'Iowa',
+  'Illinois': 'Illinois',
+  'Minnesota': 'Minnesota',
+  'SIUE': 'SIUE',
+  'UIC': 'UIC',
+  'Bradley': 'Bradley',
+  'NIU': 'NIU',
+  'Indiana St.': 'Indiana St',
+  'St. Thomas (MN)': 'St. Thomas',
+};
 
-    const year = targetDate.getFullYear();
-    const month = String(targetDate.getMonth() + 1).padStart(2, '0');
-    const day = String(targetDate.getDate()).padStart(2, '0');
-    const formattedDate = `${year}-${month}-${day}`;
-    const url = `https://www.ncaa.com/scoreboard/baseball/d1/${year}/${month}/${day}/all-conf`;
+function isCoverageTeam(name) {
+  return name in NCAA_TEAM_MAP;
+}
 
-    console.log(`Fetching NCAA scores from: ${url}`);
-    const { data } = await axios.get(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
-      timeout: 15000,
-    });
+function displayName(name) {
+  return NCAA_TEAM_MAP[name] || name;
+}
 
-    const $ = cheerio.load(data);
-    const scores = [];
+function formatScoreLine(g) {
+  const away = g.away?.names?.short || '';
+  const home = g.home?.names?.short || '';
+  const awayScore = g.away?.score || '';
+  const homeScore = g.home?.score || '';
+  const state = g.gameState || '';
+  const period = g.currentPeriod || '';
 
-    $('div.gamePod.gamePod-type-game').each((i, gameEl) => {
-      const gameContainer = $(gameEl);
-      const teamItems = gameContainer.find('ul.gamePod-game-teams li');
-      if (teamItems.length >= 2) {
-        const team1Name = teamItems.eq(0).find('span.gamePod-game-team-name:not(.short)').first().text().trim();
-        const team1Score = teamItems.eq(0).find('span.gamePod-game-team-score').text().trim();
-        const team2Name = teamItems.eq(1).find('span.gamePod-game-team-name:not(.short)').first().text().trim();
-        const team2Score = teamItems.eq(1).find('span.gamePod-game-team-score').text().trim();
-        if ((TEAMS.includes(team1Name) || TEAMS.includes(team2Name)) && team1Name && team2Name && team1Score && team2Score) {
-          scores.push(`${team1Name} ${team1Score} ${team2Name} ${team2Score} F`);
-        }
-      }
-    });
+  const awayDisplay = displayName(away);
+  const homeDisplay = displayName(home);
 
-    if (scores.length === 0) {
-      return `📊 No games found for your teams on ${formattedDate}\n\nTip: Scores may not be available yet. Try again after games complete.`;
-    }
-
-    const dayName = targetDate.toLocaleDateString('en-US', { weekday: 'long' });
-    const monthDay = targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    let output = `📊 NCAA Baseball Scores — ${dayName}, ${monthDay}\n───\n`;
-    scores.forEach((score) => { output += score + '\n'; });
-    return output;
-  } catch (error) {
-    console.error('✗ NCAA scrape error:', error.message);
-    return '❌ Failed to fetch scores. Please try again later.';
+  if (state === 'final') {
+    // Bold the winner
+    const awayBold = g.away?.winner ? `*${awayDisplay}*` : awayDisplay;
+    const homeBold = g.home?.winner ? `*${homeDisplay}*` : homeDisplay;
+    return `${awayBold} ${awayScore}, ${homeBold} ${homeScore} — FINAL`;
+  } else if (state === 'live') {
+    return `${awayDisplay} ${awayScore}, ${homeDisplay} ${homeScore} — LIVE (${period})`;
+  } else {
+    // Scheduled — show time
+    const time = g.startTime || 'TBA';
+    return `${awayDisplay} vs ${homeDisplay} — ${time}`;
   }
+}
+
+async function fetchNcaaScores(division = 'd1', dateStr = null) {
+  let targetDate;
+  if (!dateStr) {
+    targetDate = new Date();
+  } else {
+    targetDate = new Date(dateStr + 'T12:00:00');
+    if (isNaN(targetDate)) return '❌ Invalid date. Use YYYY-MM-DD';
+  }
+
+  const yyyy = targetDate.getFullYear();
+  const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
+  const dd = String(targetDate.getDate()).padStart(2, '0');
+  const url = `https://ncaa-api.henrygd.me/scoreboard/baseball/${division}/${yyyy}/${mm}/${dd}/all-conf`;
+
+  console.log(`⚾ Fetching ${division.toUpperCase()} scores: ${url}`);
+
+  const res = await axios.get(url, {
+    timeout: 8000,
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+  });
+
+  const games = (res.data?.games || []).map(g => g.game);
+  const divLabel = division.toUpperCase();
+
+  // Separate coverage games from the rest
+  const coverageGames = [];
+  const otherGames = [];
+
+  for (const g of games) {
+    const away = g.away?.names?.short || '';
+    const home = g.home?.names?.short || '';
+    if (isCoverageTeam(away) || isCoverageTeam(home)) {
+      coverageGames.push(g);
+    } else {
+      otherGames.push(g);
+    }
+  }
+
+  const dateLabel = targetDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  let output = `⚾ *NCAA ${divLabel} Scores — ${dateLabel}*\n───\n`;
+
+  if (coverageGames.length === 0 && otherGames.length === 0) {
+    return output + 'No games found.';
+  }
+
+  // Coverage teams section
+  if (coverageGames.length > 0) {
+    output += `\n🎯 *Your Coverage*\n`;
+    // Group by state: final, live, scheduled
+    for (const state of ['final', 'live', 'preview']) {
+      const group = coverageGames.filter(g => g.gameState === state);
+      if (group.length > 0) {
+        const label = state === 'final' ? 'FINAL' : state === 'live' ? 'LIVE' : 'SCHEDULED';
+        output += `\n${label}\n`;
+        group.forEach(g => { output += `  ${formatScoreLine(g)}\n`; });
+      }
+    }
+  }
+
+  // All other games section
+  if (otherGames.length > 0) {
+    output += `\n📋 *All Other ${divLabel} Games (${otherGames.length})*\n`;
+    for (const state of ['live', 'final', 'preview']) {
+      const group = otherGames.filter(g => g.gameState === state);
+      if (group.length > 0) {
+        const label = state === 'final' ? 'FINAL' : state === 'live' ? 'LIVE' : 'SCHEDULED';
+        output += `\n${label}\n`;
+        group.forEach(g => { output += `  ${formatScoreLine(g)}\n`; });
+      }
+    }
+  }
+
+  return output;
 }
 
 // ─── Scheduled Chron ─────────────────────────────────────────────────────────
@@ -667,9 +741,12 @@ const HELP_TEXT = [
   '/stats top 5 Iowa hitters by BA',
   '/statsplus BB% leaders all D1 pitchers min 20 IP',
   '',
-  '📊 Scores',
-  '/espn_scores — Today\'s NCAA scores',
-  '/espn_scores YYYY-MM-DD — Specific date',
+  '⚾ Scores',
+  '/scores — Today\'s D1 scores (your teams first)',
+  '/scores d2 — D2 scores',
+  '/scores d3 — D3 scores',
+  '/scores YYYY-MM-DD — Specific date',
+  '/scores d2 YYYY-MM-DD — D2 on specific date',
   '',
   'ℹ️ General',
   '/start — Bot status',
@@ -847,15 +924,30 @@ bot.onText(/\/game_states(?:\s+(.+))?$/, async (msg, match) => {
   }
 });
 
-bot.onText(/\/espn_scores(?:\s(.+))?/, async (msg, match) => {
+// /scores [d1|d2|d3] [YYYY-MM-DD]
+bot.onText(/\/scores(?:\s+(.+))?$/, async (msg, match) => {
   const chatId = msg.chat.id;
-  const dateArg = match[1] ? match[1].trim() : null;
-  const dateStr = (dateArg && dateArg.toLowerCase() !== 'today') ? dateArg : null;
+  const args = (match[1] || '').trim().toLowerCase().split(/\s+/);
+
+  // Parse division and optional date from args
+  let division = 'd1';
+  let dateStr = null;
+
+  for (const arg of args) {
+    if (['d1', 'd2', 'd3'].includes(arg)) {
+      division = arg;
+    } else if (/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
+      dateStr = arg;
+    }
+  }
+
   try {
-    const scores = await espnScores(dateStr);
-    await bot.sendMessage(chatId, scores, { parse_mode: 'Markdown' });
+    await bot.sendMessage(chatId, `⚾ Fetching ${division.toUpperCase()} scores...`);
+    const result = await fetchNcaaScores(division, dateStr);
+    await sendChunked(chatId, result, { parse_mode: 'Markdown' });
   } catch (error) {
-    bot.sendMessage(chatId, `❌ Error: ${error.message}`);
+    console.error('✗ /scores error:', error.message);
+    await bot.sendMessage(chatId, `❌ Failed to fetch scores: ${error.message}`);
   }
 });
 
@@ -1055,71 +1147,6 @@ bot.onText(/\/statsplus(?:\s+(.+))?$/, async (msg, match) => {
   await handleStatsQuery(chatId, question, 'claude-sonnet-4-20250514');
 });
 
-
-// ─── Score Test (temporary) ──────────────────────────────────────────────────
-
-bot.onText(/\/scoretest/, async (msg) => {
-  const chatId = msg.chat.id;
-  try {
-    await bot.sendMessage(chatId, '🔍 Searching all divisions for your coverage teams...');
-
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const dd = String(today.getDate()).padStart(2, '0');
-
-    // Coverage team keywords to search for
-    const coverageKeywords = [
-      'north dakota', 'uic', 'southern ill', 'eastern illinois',
-      'northwestern', 'milwaukee', 'iowa', 'illinois', 'minnesota',
-      'siue', 'siu edwardsville', 'south dakota', 'bradley',
-      'northern illinois', 'niu', 'st. thomas', 'western ill',
-      'indiana st', 'illinois st'
-    ];
-
-    const divisions = ['d1', 'd2', 'd3'];
-    const allMatches = [];
-    const divSummary = [];
-
-    for (const div of divisions) {
-      try {
-        const url = `https://ncaa-api.henrygd.me/scoreboard/baseball/${div}/${yyyy}/${mm}/${dd}/all-conf`;
-        const res = await axios.get(url, {
-          timeout: 8000,
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-        });
-        const games = res.data?.games || [];
-        divSummary.push(`${div.toUpperCase()}: ${games.length} games`);
-
-        for (const g of games) {
-          const away = g.game?.away?.names?.short || '';
-          const home = g.game?.home?.names?.short || '';
-          const awayFull = g.game?.away?.names?.full || '';
-          const homeFull = g.game?.home?.names?.full || '';
-
-          const bothNames = `${away} ${home} ${awayFull} ${homeFull}`.toLowerCase();
-          const matched = coverageKeywords.some(kw => bothNames.includes(kw));
-
-          if (matched) {
-            allMatches.push(`[${div.toUpperCase()}] ${away} vs ${home}`);
-          }
-        }
-      } catch (err) {
-        divSummary.push(`${div.toUpperCase()}: failed (${err.message})`);
-      }
-    }
-
-    const summary = divSummary.join('\n');
-    const matches = allMatches.length > 0
-      ? allMatches.join('\n')
-      : 'No coverage team matches found today';
-
-    await sendChunked(chatId, `📊 Division totals:\n${summary}\n\n🎯 Coverage team matches:\n${matches}`);
-
-  } catch (err) {
-    await bot.sendMessage(chatId, `❌ Failed: ${err.message}`);
-  }
-});
 
 // 7 AM Central daily
 cron.schedule('0 12 * * *', () => {
