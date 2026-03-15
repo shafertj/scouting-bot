@@ -1061,36 +1061,38 @@ bot.onText(/\/statsplus(?:\s+(.+))?$/, async (msg, match) => {
 bot.onText(/\/scoretest/, async (msg) => {
   const chatId = msg.chat.id;
   try {
-    await bot.sendMessage(chatId, '🔍 Testing NCAA scoreboard endpoint...');
+    await bot.sendMessage(chatId, '🔍 Testing multiple NCAA endpoints...');
 
     const today = new Date();
     const yyyy = today.getFullYear();
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const dd = String(today.getDate()).padStart(2, '0');
-    const dateStr = `${yyyy}/${mm}/${dd}`;
 
-    const url = `https://data.ncaa.com/casablanca/scoreboard/baseball/d1/${dateStr}/scoreboard.json`;
-    console.log(`🔍 Fetching: ${url}`);
+    const urls = [
+      `https://data.ncaa.com/casablanca/scoreboard/baseball/d1/${yyyy}/${mm}/${dd}/scoreboard.json`,
+      `https://ncaa-api.henrygd.me/scoreboard/baseball/d1/${yyyy}/${mm}/${dd}/all-conf`,
+      `https://site.api.espn.com/apis/site/v2/sports/baseball/college-baseball/scoreboard?dates=${yyyy}${mm}${dd}`,
+      `https://site.web.api.espn.com/apis/site/v2/sports/baseball/college-baseball/scoreboard?dates=${yyyy}${mm}${dd}`,
+    ];
 
-    const res = await axios.get(url, {
-      timeout: 8000,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-    });
-
-    const data = res.data;
-    const gameCount = data?.games?.length || 0;
-
-    if (gameCount === 0) {
-      await bot.sendMessage(chatId, `✅ Endpoint responded but no games found for ${yyyy}-${mm}-${dd}.\n\nRaw keys: ${Object.keys(data).join(', ')}`);
-      return;
+    const results = [];
+    for (const url of urls) {
+      try {
+        const res = await axios.get(url, {
+          timeout: 6000,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+        const keys = Object.keys(res.data || {}).join(', ');
+        const gameCount = res.data?.games?.length || res.data?.events?.length || '?';
+        results.push(`✅ ${url}\nKeys: ${keys}\nGames: ${gameCount}`);
+      } catch (err) {
+        results.push(`❌ ${url}\n${err.message}`);
+      }
     }
 
-    // Show first 2 games raw so we can see the structure
-    const sample = data.games.slice(0, 2).map(g => JSON.stringify(g, null, 2)).join('\n\n');
-    await sendChunked(chatId, `✅ Found ${gameCount} games!\n\nSample (first 2):\n${sample}`);
-
+    await sendChunked(chatId, results.join('\n\n'));
   } catch (err) {
-    await bot.sendMessage(chatId, `❌ Failed: ${err.message}\n\nURL tried: https://data.ncaa.com/casablanca/scoreboard/baseball/d1/YYYY/MM/DD/scoreboard.json`);
+    await bot.sendMessage(chatId, `❌ Test failed: ${err.message}`);
   }
 });
 
