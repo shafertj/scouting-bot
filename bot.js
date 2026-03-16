@@ -711,13 +711,32 @@ async function fetchNcaaScores(division = 'd1', dateStr = null) {
     // All other D1 games grouped by conference
     if (otherGames.length > 0) {
       // Build conference → games map
+      // Conference name formatting from SEO slug
+      const confSeoToName = {
+        'acc': 'ACC', 'big-12': 'Big 12', 'big-ten': 'Big Ten', 'big-east': 'Big East',
+        'sec': 'SEC', 'pac-12': 'Pac-12', 'american': 'American', 'cusa': 'C-USA',
+        'mac': 'MAC', 'mwc': 'Mountain West', 'sun-belt': 'Sun Belt',
+        'mvc': 'Missouri Valley', 'horizon': 'Horizon', 'summit': 'Summit League',
+        'big-south': 'Big South', 'southern': 'Southern', 'southland': 'Southland',
+        'wac': 'WAC', 'wcc': 'WCC', 'patriot': 'Patriot', 'ivy': 'Ivy League',
+        'maac': 'MAAC', 'a-sun': 'ASUN', 'caa': 'CAA', 'meac': 'MEAC',
+        'swac': 'SWAC', 'nec': 'NEC', 'ovc': 'OVC', 'big-west': 'Big West',
+        'america-east': 'America East', 'atlantic-10': 'Atlantic 10',
+        'atlantic-sun': 'ASUN', 'ind': 'Independent',
+      };
+
+      function getConfName(g) {
+        const seo = g.away?.conferences?.[0]?.conferenceSeo ||
+                    g.home?.conferences?.[0]?.conferenceSeo || '';
+        return confSeoToName[seo] || g.away?.conferences?.[0]?.conferenceName ||
+               g.home?.conferences?.[0]?.conferenceName || 'Independent';
+      }
+
       const byConf = {};
       for (const g of otherGames) {
-        const conf = g.away?.conferences?.[0]?.conferenceName ||
-                     g.home?.conferences?.[0]?.conferenceName || 'Independent';
-        const confClean = conf || 'Independent';
-        if (!byConf[confClean]) byConf[confClean] = [];
-        byConf[confClean].push(g);
+        const conf = getConfName(g);
+        if (!byConf[conf]) byConf[conf] = [];
+        byConf[conf].push(g);
       }
 
       output += `\n📋 *All Other D1 Games*\n`;
