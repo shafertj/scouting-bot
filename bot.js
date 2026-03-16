@@ -890,6 +890,7 @@ const HELP_TEXT = [
   '⚾ Scores',
   '/scores — Today\'s D1 scores (your teams first)',
   '/scores big ten — Single conference',
+  '/scores mvc 2026-03-13 +3 — Conference over N days',
   '/scores sec 2026-03-15 — Conference on date',
   '/scores d2 — D2 regional scores',
   '/scores d3 — D3 regional scores',
@@ -1072,6 +1073,92 @@ bot.onText(/\/game_states(?:\s+(.+))?$/, async (msg, match) => {
 });
 
 // /scores [d1|d2|d3] [YYYY-MM-DD]
+// Fetch scores across multiple days — only used with conf/team filter
+async function fetchNcaaScoresMultiDay(division, dateStr, daysAhead, confFilter) {
+  const startDate = dateStr
+    ? new Date(dateStr + 'T12:00:00')
+    : new Date();
+
+  const results = [];
+
+  for (let i = 0; i < daysAhead; i++) {
+    const d = new Date(startDate);
+    d.setDate(d.getDate() + i);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const dayLabel = d.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+    try {
+      const url = `https://ncaa-api.henrygd.me/scoreboard/baseball/${division}/${yyyy}/${mm}/${dd}/all-conf`;
+      const res = await axios.get(url, {
+        timeout: 8000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+      });
+
+      const games = (res.data?.games || []).map(g => g.game);
+
+      // Build conference map with double-sort
+      const confSeoToName = {
+        'acc': 'ACC', 'big-12': 'Big 12', 'big-ten': 'Big Ten', 'big-east': 'Big East',
+        'sec': 'SEC', 'pac-12': 'Pac-12', 'american': 'American', 'cusa': 'C-USA',
+        'mac': 'MAC', 'mwc': 'Mountain West', 'sun-belt': 'Sun Belt',
+        'mvc': 'Missouri Valley', 'horizon': 'Horizon', 'summit': 'Summit League',
+        'big-south': 'Big South', 'southern': 'Southern', 'southland': 'Southland',
+        'wac': 'WAC', 'wcc': 'WCC', 'patriot': 'Patriot', 'ivy': 'Ivy League',
+        'maac': 'MAAC', 'a-sun': 'ASUN', 'caa': 'CAA', 'meac': 'MEAC',
+        'swac': 'SWAC', 'nec': 'NEC', 'ovc': 'OVC', 'big-west': 'Big West',
+        'america-east': 'America East', 'atlantic-10': 'Atlantic 10',
+        'atlantic-sun': 'ASUN', 'big-east': 'Big East', 'ind': 'Independent',
+      };
+
+      const byConf = {};
+      for (const g of games) {
+        const awaySeo = g.away?.conferences?.[0]?.conferenceSeo || '';
+        const homeSeo = g.home?.conferences?.[0]?.conferenceSeo || '';
+        const awayConf = confSeoToName[awaySeo] || g.away?.conferences?.[0]?.conferenceName || 'Independent';
+        const homeConf = confSeoToName[homeSeo] || g.home?.conferences?.[0]?.conferenceName || 'Independent';
+        if (!byConf[awayConf]) byConf[awayConf] = [];
+        byConf[awayConf].push(g);
+        if (homeConf !== awayConf) {
+          if (!byConf[homeConf]) byConf[homeConf] = [];
+          byConf[homeConf].push(g);
+        }
+      }
+
+      // Filter to requested conference
+      const matchedConf = Object.keys(byConf).find(c => c.toLowerCase() === confFilter.toLowerCase());
+      const dayGames = matchedConf ? byConf[matchedConf] : [];
+
+      if (dayGames.length > 0) {
+        let dayOutput = `\n📅 *${dayLabel}*\n`;
+        for (const state of ['live', 'final', 'preview']) {
+          dayGames
+            .filter(g => g.gameState === state)
+            .forEach(g => {
+              const line = formatScoreLine(g);
+              if (line) dayOutput += `  ${line}\n`;
+            });
+        }
+        results.push(dayOutput);
+      } else {
+        results.push(`\n📅 *${dayLabel}*\n  No ${confFilter} games\n`);
+      }
+    } catch (err) {
+      results.push(`\n📅 *${dayLabel}*\n  Failed to fetch\n`);
+    }
+  }
+
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + daysAhead - 1);
+  const startLabel = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const endLabel = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+  let output = `⚾ *${confFilter} — ${startLabel} through ${endLabel}*\n───`;
+  output += results.join('');
+  return output;
+}
+
 // Conference keyword → display name mapping for /scores filter
 const CONF_KEYWORDS = {
   'acc': 'ACC', 'big ten': 'Big Ten', 'big-ten': 'Big Ten', 'b1g': 'Big Ten',
@@ -1122,15 +1209,18 @@ bot.onText(/\/scores(?:\s+(.+))?$/, async (msg, match) => {
   const argStr = (match[1] || '').trim().toLowerCase();
   const args = argStr.split(/\s+/);
 
-  // Parse division, date, and conference from args
+  // Parse division, date, +N days ahead, and conference from args
   let division = 'd1';
   let dateStr = null;
+  let daysAhead = null;
 
   for (const arg of args) {
     if (['d1', 'd2', 'd3'].includes(arg)) {
       division = arg;
     } else if (/^\d{4}-\d{2}-\d{2}$/.test(arg)) {
       dateStr = arg;
+    } else if (/^\+\d+$/.test(arg)) {
+      daysAhead = parseInt(arg.slice(1));
     }
   }
 
@@ -1140,7 +1230,16 @@ bot.onText(/\/scores(?:\s+(.+))?$/, async (msg, match) => {
   try {
     const label = confFilter ? confFilter : division.toUpperCase();
     await bot.sendMessage(chatId, `⚾ Fetching ${label} scores...`);
-    const result = await fetchNcaaScores(division, dateStr, confFilter);
+
+    let result;
+    if (confFilter && daysAhead && daysAhead > 1) {
+      // Multi-day fetch — only available with conference filter
+      const days = Math.min(daysAhead, 7); // cap at 7 days
+      result = await fetchNcaaScoresMultiDay(division, dateStr, days, confFilter);
+    } else {
+      result = await fetchNcaaScores(division, dateStr, confFilter);
+    }
+
     await sendChunked(chatId, result, { parse_mode: 'Markdown' });
   } catch (error) {
     console.error('✗ /scores error:', error.message);
