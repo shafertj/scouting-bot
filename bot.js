@@ -41,18 +41,6 @@ try {
   process.exit(1);
 }
 
-// Load teams from teams.json
-let TEAMS = [];
-try {
-  const teamsPath = path.join(__dirname, 'teams.json');
-  const teamsData = fs.readFileSync(teamsPath, 'utf8');
-  TEAMS = JSON.parse(teamsData).teams;
-  console.log(`✓ Loaded ${TEAMS.length} teams from teams.json`);
-} catch (error) {
-  console.error('✗ Failed to load teams.json:', error.message);
-  process.exit(1);
-}
-
 // Initialize Telegram bot
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
@@ -330,9 +318,12 @@ const TEAM_SHORT_NAMES = {
   'milwaukee athletics baseball': 'Milwaukee',
   'university of wisconsin-milwaukee baseball': 'Milwaukee',
   'university of nebraska baseball': 'Nebraska',
-  'iowa state university baseball': 'Iowa St',
   'western illinois university baseball': 'WIU',
-  'indiana state university baseball': 'Indiana St',
+  'northern illinois university baseball': 'NIU',
+  'bradley university baseball': 'Bradley',
+  'bradley baseball': 'Bradley',
+  'st. thomas baseball': 'St. Thomas',
+  'university of st. thomas baseball': 'St. Thomas',
 };
 
 function shortenOpponent(name) {
@@ -1006,16 +997,16 @@ const STATS_TEAM_KEYWORDS = [
   ['siu edwardsville', 'SIUE'], ['siue', 'SIUE'],
   ['eastern illinois', 'EIU'], ['eiu', 'EIU'],
   ['illinois state', 'Illinois St'], ['illinois st', 'Illinois St'],
-  ['iowa state', 'Iowa St'], ['iowa st', 'Iowa St'],
   ['minnesota state', 'Minnesota St'], ['minnesota st', 'Minnesota St'],
   ['north dakota state', 'NDSU'], ['ndsu', 'NDSU'],
   ['south dakota state', 'SDSU'], ['sdsu', 'SDSU'],
   ['western illinois', 'WIU'], ['wiu', 'WIU'],
-  ['indiana state', 'Indiana St'], ['indiana st', 'Indiana St'],
+  ['northern illinois', 'NIU'], ['niu', 'NIU'],
   ['northwestern', 'Northwestern'],
+  ['st. thomas', 'St. Thomas'],
+  ['bradley', 'Bradley'],
   ['illini', 'Illinois'], ['university of illinois', 'Illinois'],
   ['milwaukee', 'Milwaukee'],
-  ['nebraska', 'Nebraska'],
   ['minnesota', 'Minnesota'],
   ['illinois', 'Illinois'],
   ['iowa', 'Iowa'],
