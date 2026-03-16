@@ -27,7 +27,7 @@ const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 
 // Allowlist of approved phone numbers (E.164 format: +12223334444)
 const SMS_ALLOWLIST = [
-  '+18154838390', // your number
+  // Add approved numbers here e.g. '+12223334444'
 ];
 const OAUTH_CREDENTIALS_JSON = process.env.OAUTH_CREDENTIALS || fs.readFileSync(path.join(__dirname, 'credentials.json'), 'utf8');
 const TOKEN_PATH = path.join(__dirname, 'token.json');
@@ -742,11 +742,23 @@ async function fetchNcaaScores(division = 'd1', dateStr = null) {
                g.home?.conferences?.[0]?.conferenceName || 'Independent';
       }
 
+      // Double-sort: each game appears under BOTH teams' conferences
       const byConf = {};
       for (const g of otherGames) {
-        const conf = getConfName(g);
-        if (!byConf[conf]) byConf[conf] = [];
-        byConf[conf].push(g);
+        const awaySeo = g.away?.conferences?.[0]?.conferenceSeo || '';
+        const homeSeo = g.home?.conferences?.[0]?.conferenceSeo || '';
+        const awayConf = confSeoToName[awaySeo] || g.away?.conferences?.[0]?.conferenceName || 'Independent';
+        const homeConf = confSeoToName[homeSeo] || g.home?.conferences?.[0]?.conferenceName || 'Independent';
+
+        // Add to away team's conference
+        if (!byConf[awayConf]) byConf[awayConf] = [];
+        byConf[awayConf].push(g);
+
+        // Add to home team's conference if different
+        if (homeConf !== awayConf) {
+          if (!byConf[homeConf]) byConf[homeConf] = [];
+          byConf[homeConf].push(g);
+        }
       }
 
       output += `\n📋 *All Other D1 Games*\n`;
