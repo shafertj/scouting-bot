@@ -15,6 +15,8 @@
     "xlsx": "^0.18.5",
     "@google-cloud/local-auth": "^2.1.1",
     "cheerio": "^1.0.0-rc.12",
+    "twilio": "^5.0.0",
+    "express": "^4.18.0",
     "axios": "^1.6.2",
     "node-cron": "^3.0.2",
     "dotenv": "^16.3.1",
