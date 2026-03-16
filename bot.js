@@ -27,7 +27,7 @@ const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 
 // Allowlist of approved phone numbers (E.164 format: +12223334444)
 const SMS_ALLOWLIST = [
-  // Add approved numbers here e.g. '+12223334444'
+  '+18154838390', // your number
 ];
 const OAUTH_CREDENTIALS_JSON = process.env.OAUTH_CREDENTIALS || fs.readFileSync(path.join(__dirname, 'credentials.json'), 'utf8');
 const TOKEN_PATH = path.join(__dirname, 'token.json');
