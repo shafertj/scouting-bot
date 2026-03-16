@@ -531,6 +531,72 @@ async function formatProgramSnapshot(events) {
 
 // ─── NCAA Scores ─────────────────────────────────────────────────────────────
 
+// ─── Regional D2/D3 School Filter ───────────────────────────────────────────
+// Keywords matched against NCAA API short names (case-insensitive)
+// Used to filter /scores d2 and /scores d3 to regional schools only
+
+const D2_REGIONAL_KEYWORDS = [
+  // Illinois
+  'lewis', 'mckendree', 'quincy', 'roosevelt', 'illinois springfield', 'uis',
+  // Iowa
+  'upper iowa',
+  // Minnesota
+  'bemidji', 'concordia-st. paul', 'concordia st. paul', 'minnesota st.', 'minnesota state',
+  'minn.-crookston', 'minnesota-crookston', 'minnesota-duluth', 'minn.-duluth',
+  'st. cloud', 'sw minnesota', 'southwest minnesota', 'winona st.', 'winona state',
+  // North Dakota
+  'mary', 'minot st.', 'minot state',
+  // South Dakota
+  'augustana (sd)', 'augustana (s.d.)', 'northern st.', 'northern state (sd)', 'sioux falls',
+  // Wisconsin
+  'wis.-parkside', 'parkside',
+];
+
+const D3_REGIONAL_KEYWORDS = [
+  // Illinois - CCIW
+  'augustana (il)', 'augustana (i', 'carroll', 'carthage', 'elmhurst',
+  'illinois wesleyan', 'millikin', 'north central (il)', 'north central (i',
+  'north park', 'wheaton (il)', 'wheaton (i',
+  // Illinois - NACC
+  'aurora', 'benedictine (il)', 'concordia chicago', 'concordia-chicago',
+  'dominican (il)', 'edgewood', 'illinois tech', 'lakeland',
+  'marian (wi)', 'milwaukee engineering', 'rockford', 'wis. lutheran', 'wisconsin lutheran',
+  // Illinois - SLIAC
+  'blackburn', 'eureka', 'greenville', 'principia',
+  // Wisconsin
+  'concordia wi', 'concordia (wi', 'st. norbert', 'maranatha',
+  'beloit', 'ripon', 'lawrence',
+  'uw-eau claire', 'uw-la crosse', 'uw-oshkosh', 'uw-platteville',
+  'uw-river falls', 'uw-stevens point', 'uw-stout', 'uw-superior', 'uw-whitewater',
+  // Minnesota - MIAC
+  'augsburg', 'bethel (mn)', 'bethel (m', 'carleton', 'concordia-moorhead',
+  'gustavus', 'hamline', 'macalester', "st. john's (mn)", "st. john's (m",
+  "st. mary's (mn)", "st. mary's (m", 'st. olaf', 'st. scholastica',
+  // Minnesota - UMAC
+  'bethany lutheran', 'crown', 'martin luther', 'minnesota-morris',
+  'north central (mn)', 'north central (m', 'northwestern (mn)', 'northwestern (m',
+  // Iowa - ARC
+  'buena vista', 'central (ia)', 'central (i', 'coe', 'dubuque',
+  'loras', 'luther', 'simpson', 'wartburg',
+  // MWC (IA/IL/WI/MN)
+  'cornell college', 'grinnell', 'illinois college', 'knox',
+  'monmouth (il)', 'monmouth (i',
+  // UAA
+  'chicago',
+];
+
+function isRegionalD2(name) {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  return D2_REGIONAL_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+function isRegionalD3(name) {
+  if (!name) return false;
+  const lower = name.toLowerCase();
+  return D3_REGIONAL_KEYWORDS.some(kw => lower.includes(kw));
+}
+
 // Exact team name mappings from NCAA API → your coverage teams
 // Key: what the NCAA API returns, Value: your display name
 const NCAA_TEAM_MAP = {
@@ -609,48 +675,82 @@ async function fetchNcaaScores(division = 'd1', dateStr = null) {
   const games = (res.data?.games || []).map(g => g.game);
   const divLabel = division.toUpperCase();
 
-  // Separate coverage games from the rest
-  const coverageGames = [];
-  const otherGames = [];
-
-  for (const g of games) {
-    const away = g.away?.names?.short || '';
-    const home = g.home?.names?.short || '';
-    if (isCoverageTeam(away) || isCoverageTeam(home)) {
-      coverageGames.push(g);
-    } else {
-      otherGames.push(g);
-    }
-  }
-
   const dateLabel = targetDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   let output = `⚾ *NCAA ${divLabel} Scores — ${dateLabel}*\n───\n`;
 
-  if (coverageGames.length === 0 && otherGames.length === 0) {
-    return output + 'No games found.';
-  }
+  if (games.length === 0) return output + 'No games found.';
 
-  // Coverage teams section
-  if (coverageGames.length > 0) {
-    output += `\n🎯 *Your Coverage*\n`;
-    // Group by state: final, live, scheduled
-    for (const state of ['final', 'live', 'preview']) {
-      const group = coverageGames.filter(g => g.gameState === state);
-      if (group.length > 0) {
-        const label = state === 'final' ? 'FINAL' : state === 'live' ? 'LIVE' : 'SCHEDULED';
-        output += `\n${label}\n`;
-        group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+  if (division === 'd1') {
+    // D1: Coverage teams first, then all others grouped by conference
+    const coverageGames = [];
+    const otherGames = [];
+
+    for (const g of games) {
+      const away = g.away?.names?.short || '';
+      const home = g.home?.names?.short || '';
+      if (isCoverageTeam(away) || isCoverageTeam(home)) {
+        coverageGames.push(g);
+      } else {
+        otherGames.push(g);
       }
     }
-  }
 
-  // All other games section
-  if (otherGames.length > 0) {
-    output += `\n📋 *All Other ${divLabel} Games (${otherGames.length})*\n`;
+    // Coverage section
+    if (coverageGames.length > 0) {
+      output += `\n🎯 *Your Coverage*\n`;
+      for (const state of ['final', 'live', 'preview']) {
+        const group = coverageGames.filter(g => g.gameState === state);
+        if (group.length > 0) {
+          const label = state === 'live' ? 'LIVE' : state === 'preview' ? 'SCHEDULED' : 'FINAL';
+          output += `\n${label}\n`;
+          group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+        }
+      }
+    }
+
+    // All other D1 games grouped by conference
+    if (otherGames.length > 0) {
+      // Build conference → games map
+      const byConf = {};
+      for (const g of otherGames) {
+        const conf = g.away?.conferences?.[0]?.conferenceName ||
+                     g.home?.conferences?.[0]?.conferenceName || 'Independent';
+        const confClean = conf || 'Independent';
+        if (!byConf[confClean]) byConf[confClean] = [];
+        byConf[confClean].push(g);
+      }
+
+      output += `\n📋 *All Other D1 Games*\n`;
+      for (const conf of Object.keys(byConf).sort()) {
+        output += `\n${conf}\n`;
+        // Within each conference: live first, then final, then scheduled
+        const confGames = byConf[conf];
+        for (const state of ['live', 'final', 'preview']) {
+          confGames
+            .filter(g => g.gameState === state)
+            .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+        }
+      }
+    }
+
+  } else {
+    // D2/D3: Regional schools only, no "all other games"
+    const isRegional = division === 'd2' ? isRegionalD2 : isRegionalD3;
+    const regionalGames = games.filter(g => {
+      const away = g.away?.names?.short || '';
+      const home = g.home?.names?.short || '';
+      return isRegional(away) || isRegional(home);
+    });
+
+    if (regionalGames.length === 0) {
+      return output + `No regional games found today.\n\nChecked ${games.length} total ${divLabel} games.`;
+    }
+
+    output += `\n🎯 *Regional ${divLabel} Games (IL/WI/IA/MN/ND/SD)*\n`;
     for (const state of ['live', 'final', 'preview']) {
-      const group = otherGames.filter(g => g.gameState === state);
+      const group = regionalGames.filter(g => g.gameState === state);
       if (group.length > 0) {
-        const label = state === 'final' ? 'FINAL' : state === 'live' ? 'LIVE' : 'SCHEDULED';
+        const label = state === 'live' ? 'LIVE' : state === 'preview' ? 'SCHEDULED' : 'FINAL';
         output += `\n${label}\n`;
         group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
       }
