@@ -8,6 +8,8 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import twilio from 'twilio';
+import express from 'express';
 
 dotenv.config();
 
@@ -19,6 +21,14 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+
+// Allowlist of approved phone numbers (E.164 format: +12223334444)
+const SMS_ALLOWLIST = [
+  // Add approved numbers here e.g. '+12223334444'
+];
 const OAUTH_CREDENTIALS_JSON = process.env.OAUTH_CREDENTIALS || fs.readFileSync(path.join(__dirname, 'credentials.json'), 'utf8');
 const TOKEN_PATH = path.join(__dirname, 'token.json');
 const SCOPES = [
@@ -1257,6 +1267,162 @@ bot.onText(/\/statsplus(?:\s+(.+))?$/, async (msg, match) => {
 });
 
 
+
+// ─── Twilio SMS Handler ───────────────────────────────────────────────────────
+
+const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
+  ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+  : null;
+
+const smsApp = express();
+smsApp.use(express.urlencoded({ extended: false }));
+smsApp.use(express.json());
+
+// Strip markdown for SMS — no bold, no special chars
+function stripMarkdown(text) {
+  return text
+    .replace(/\*([^*]+)\*/g, '$1')  // remove bold
+    .replace(/`([^`]+)`/g, '$1')      // remove code
+    .replace(/─+/g, '---')            // replace unicode lines
+    .replace(/[🧭📅📊🎯📋⚾🔍🏟]/gu, '') // remove emojis
+    .replace(/^\s+/gm, '')            // trim leading spaces per line
+    .trim();
+}
+
+async function sendSms(to, body) {
+  if (!twilioClient) {
+    console.warn('⚠ Twilio not configured');
+    return;
+  }
+  try {
+    // Split into 1500 char chunks to avoid carrier issues
+    const chunks = [];
+    let remaining = body;
+    while (remaining.length > 1500) {
+      const splitAt = remaining.lastIndexOf('\n', 1500);
+      chunks.push(remaining.slice(0, splitAt));
+      remaining = remaining.slice(splitAt + 1);
+    }
+    chunks.push(remaining);
+
+    for (const chunk of chunks) {
+      await twilioClient.messages.create({
+        body: chunk,
+        from: TWILIO_PHONE_NUMBER,
+        to,
+      });
+    }
+    console.log(`✓ SMS sent to ${to} (${chunks.length} chunk(s))`);
+  } catch (err) {
+    console.error(`✗ SMS send failed to ${to}:`, err.message);
+  }
+}
+
+// Format scores as plain text for SMS
+async function formatScoresForSms(division = 'd1', dateStr = null) {
+  const raw = await fetchNcaaScores(division, dateStr);
+  return stripMarkdown(raw);
+}
+
+// Parse incoming SMS command
+function parseSmsCommand(body) {
+  const text = (body || '').toLowerCase().trim();
+
+  // Date pattern YYYY-MM-DD
+  const dateMatch = text.match(/(\d{4}-\d{2}-\d{2})/);
+  const dateStr = dateMatch ? dateMatch[1] : null;
+
+  // Division
+  let division = 'd1';
+  if (text.includes('d2') || text.includes('division 2')) division = 'd2';
+  else if (text.includes('d3') || text.includes('division 3')) division = 'd3';
+
+  // Conference filter — check for known conference keywords
+  const confKeywords = {
+    'acc': 'ACC', 'big ten': 'Big Ten', 'big-ten': 'Big Ten',
+    'sec': 'SEC', 'big 12': 'Big 12', 'big-12': 'Big 12',
+    'pac-12': 'Pac-12', 'pac 12': 'Pac-12',
+    'american': 'American', 'cusa': 'C-USA', 'mac': 'MAC',
+    'mountain west': 'Mountain West', 'mwc': 'Mountain West',
+    'sun belt': 'Sun Belt', 'mvc': 'Missouri Valley',
+    'missouri valley': 'Missouri Valley',
+    'horizon': 'Horizon', 'summit': 'Summit League',
+    'big south': 'Big South', 'southern': 'Southern',
+    'wcc': 'WCC', 'wac': 'WAC', 'patriot': 'Patriot',
+    'ivy': 'Ivy League', 'maac': 'MAAC', 'asun': 'ASUN',
+    'caa': 'CAA', 'america east': 'America East',
+    'atlantic 10': 'Atlantic 10', 'a-10': 'Atlantic 10',
+  };
+
+  let confFilter = null;
+  for (const [kw, name] of Object.entries(confKeywords)) {
+    if (text.includes(kw)) { confFilter = name; break; }
+  }
+
+  return { division, dateStr, confFilter };
+}
+
+smsApp.post('/sms', async (req, res) => {
+  const from = req.body.From;
+  const body = req.body.Body || '';
+
+  console.log(`📱 SMS from ${from}: "${body}"`);
+
+  // Send empty TwiML response immediately to avoid timeout
+  res.type('text/xml').send('<Response></Response>');
+
+  // Check allowlist
+  if (SMS_ALLOWLIST.length > 0 && !SMS_ALLOWLIST.includes(from)) {
+    console.log(`⛔ SMS from unauthorized number: ${from}`);
+    await sendSms(from, 'Sorry, this service is private. Contact the administrator for access.');
+    return;
+  }
+
+  const { division, dateStr, confFilter } = parseSmsCommand(body);
+
+  try {
+    let result = await formatScoresForSms(division, dateStr);
+
+    // Apply conference filter if specified
+    if (confFilter) {
+      const lines = result.split('\n');
+      const filtered = [];
+      let inSection = false;
+      let inConf = false;
+
+      for (const line of lines) {
+        // Header lines
+        if (line.startsWith('NCAA') || line.startsWith('---')) {
+          filtered.push(line);
+          continue;
+        }
+        // Conference header — check if it matches filter
+        if (line && !line.startsWith(' ') && !line.match(/^(FINAL|LIVE|SCHEDULED)$/)) {
+          inConf = line.toUpperCase().includes(confFilter.toUpperCase());
+          if (inConf) filtered.push(line);
+          continue;
+        }
+        if (inConf) filtered.push(line);
+      }
+
+      result = filtered.join('\n');
+      if (filtered.length <= 2) result += `\nNo ${confFilter} games found.`;
+    }
+
+    await sendSms(from, result || 'No games found.');
+  } catch (err) {
+    console.error('✗ SMS scores error:', err.message);
+    await sendSms(from, 'Sorry, scores unavailable right now. Try again shortly.');
+  }
+});
+
+smsApp.get('/health', (req, res) => res.send('OK'));
+
+const SMS_PORT = process.env.PORT || 3000;
+smsApp.listen(SMS_PORT, () => {
+  console.log(`✓ SMS webhook server listening on port ${SMS_PORT}`);
+});
+
 // 7 AM Central daily
 cron.schedule('0 12 * * *', () => {
   console.log('⏰ Running scheduled calendar chron...');
@@ -1278,6 +1444,12 @@ async function main() {
   console.log(`✓ Calendar chron scheduled for 7 AM Central daily`);
   console.log(`✓ Chat ID: ${CHAT_ID}`);
   console.log(`✓ Reading from ${calendarsConfig.length} calendars`);
+  if (twilioClient) {
+    console.log(`✓ Twilio SMS ready on ${TWILIO_PHONE_NUMBER}`);
+    console.log(`✓ SMS allowlist: ${SMS_ALLOWLIST.length > 0 ? SMS_ALLOWLIST.length + ' numbers' : 'open access'}`);
+  } else {
+    console.warn('⚠ Twilio not configured — SMS disabled');
+  }
 }
 
 main();
