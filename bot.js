@@ -661,7 +661,7 @@ function formatScoreLine(g) {
   }
 }
 
-async function fetchNcaaScores(division = 'd1', dateStr = null) {
+async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = null) {
   let targetDate;
   if (!dateStr) {
     targetDate = new Date();
@@ -761,15 +761,30 @@ async function fetchNcaaScores(division = 'd1', dateStr = null) {
         }
       }
 
-      output += `\n📋 *All Other D1 Games*\n`;
-      for (const conf of Object.keys(byConf).sort()) {
-        output += `\n${conf}\n`;
-        // Within each conference: live first, then final, then scheduled
-        const confGames = byConf[conf];
-        for (const state of ['live', 'final', 'preview']) {
-          confGames
-            .filter(g => g.gameState === state)
-            .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+      // If conference filter specified, show only that conference
+      if (confFilter) {
+        const matchedConf = Object.keys(byConf).find(c => c.toLowerCase() === confFilter.toLowerCase());
+        if (matchedConf) {
+          output += `\n📋 *${matchedConf}*\n`;
+          const confGames = byConf[matchedConf];
+          for (const state of ['live', 'final', 'preview']) {
+            confGames
+              .filter(g => g.gameState === state)
+              .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+          }
+        } else {
+          output += `\n❌ Conference "${confFilter}" not found today.\nTry: acc, big ten, sec, mvc, big 12, pac-12, american, cusa, mac, sun belt, horizon, summit, wcc, wac, patriot, ivy, maac, asun, caa, southern, southland\n`;
+        }
+      } else {
+        output += `\n📋 *All Other D1 Games*\n`;
+        for (const conf of Object.keys(byConf).sort()) {
+          output += `\n${conf}\n`;
+          const confGames = byConf[conf];
+          for (const state of ['live', 'final', 'preview']) {
+            confGames
+              .filter(g => g.gameState === state)
+              .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+          }
         }
       }
     }
@@ -874,10 +889,11 @@ const HELP_TEXT = [
   '',
   '⚾ Scores',
   '/scores — Today\'s D1 scores (your teams first)',
-  '/scores d2 — D2 scores',
-  '/scores d3 — D3 scores',
+  '/scores big ten — Single conference',
+  '/scores sec 2026-03-15 — Conference on date',
+  '/scores d2 — D2 regional scores',
+  '/scores d3 — D3 regional scores',
   '/scores YYYY-MM-DD — Specific date',
-  '/scores d2 YYYY-MM-DD — D2 on specific date',
   '',
   'ℹ️ General',
   '/start — Bot status',
@@ -1056,11 +1072,57 @@ bot.onText(/\/game_states(?:\s+(.+))?$/, async (msg, match) => {
 });
 
 // /scores [d1|d2|d3] [YYYY-MM-DD]
+// Conference keyword → display name mapping for /scores filter
+const CONF_KEYWORDS = {
+  'acc': 'ACC', 'big ten': 'Big Ten', 'big-ten': 'Big Ten', 'b1g': 'Big Ten',
+  'sec': 'SEC', 'big 12': 'Big 12', 'big-12': 'Big 12', 'big twelve': 'Big 12',
+  'pac-12': 'Pac-12', 'pac 12': 'Pac-12', 'pac12': 'Pac-12',
+  'american': 'American', 'aac': 'American',
+  'cusa': 'C-USA', 'c-usa': 'C-USA',
+  'mac': 'MAC', 'mid-american': 'MAC',
+  'mountain west': 'Mountain West', 'mwc': 'Mountain West',
+  'sun belt': 'Sun Belt', 'sunbelt': 'Sun Belt',
+  'mvc': 'Missouri Valley', 'missouri valley': 'Missouri Valley',
+  'horizon': 'Horizon',
+  'summit': 'Summit League', 'summit league': 'Summit League',
+  'big south': 'Big South', 'big-south': 'Big South',
+  'southern': 'Southern',
+  'southland': 'Southland',
+  'wac': 'WAC',
+  'wcc': 'WCC', 'west coast': 'WCC',
+  'patriot': 'Patriot', 'patriot league': 'Patriot',
+  'ivy': 'Ivy League', 'ivy league': 'Ivy League',
+  'maac': 'MAAC',
+  'asun': 'ASUN', 'a-sun': 'ASUN', 'atlantic sun': 'ASUN',
+  'caa': 'CAA', 'colonial': 'CAA',
+  'meac': 'MEAC',
+  'swac': 'SWAC',
+  'nec': 'NEC', 'northeast': 'NEC',
+  'ovc': 'OVC', 'ohio valley': 'OVC',
+  'big west': 'Big West', 'big-west': 'Big West',
+  'america east': 'America East',
+  'atlantic 10': 'Atlantic 10', 'a-10': 'Atlantic 10', 'a10': 'Atlantic 10',
+  'big east': 'Big East', 'big-east': 'Big East',
+  'independent': 'Independent', 'ind': 'Independent',
+};
+
+function parseConfFilter(argStr) {
+  if (!argStr) return null;
+  const lower = argStr.toLowerCase().trim();
+  // Sort by length descending to match longest keyword first
+  const sorted = Object.entries(CONF_KEYWORDS).sort((a, b) => b[0].length - a[0].length);
+  for (const [kw, name] of sorted) {
+    if (lower.includes(kw)) return name;
+  }
+  return null;
+}
+
 bot.onText(/\/scores(?:\s+(.+))?$/, async (msg, match) => {
   const chatId = msg.chat.id;
-  const args = (match[1] || '').trim().toLowerCase().split(/\s+/);
+  const argStr = (match[1] || '').trim().toLowerCase();
+  const args = argStr.split(/\s+/);
 
-  // Parse division and optional date from args
+  // Parse division, date, and conference from args
   let division = 'd1';
   let dateStr = null;
 
@@ -1072,9 +1134,13 @@ bot.onText(/\/scores(?:\s+(.+))?$/, async (msg, match) => {
     }
   }
 
+  // Parse conference filter — only applies to D1
+  const confFilter = division === 'd1' ? parseConfFilter(argStr) : null;
+
   try {
-    await bot.sendMessage(chatId, `⚾ Fetching ${division.toUpperCase()} scores...`);
-    const result = await fetchNcaaScores(division, dateStr);
+    const label = confFilter ? confFilter : division.toUpperCase();
+    await bot.sendMessage(chatId, `⚾ Fetching ${label} scores...`);
+    const result = await fetchNcaaScores(division, dateStr, confFilter);
     await sendChunked(chatId, result, { parse_mode: 'Markdown' });
   } catch (error) {
     console.error('✗ /scores error:', error.message);
