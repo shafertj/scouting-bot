@@ -647,6 +647,11 @@ function formatScoreLine(g) {
   const awayDisplay = displayName(away);
   const homeDisplay = displayName(home);
 
+  // Debug — remove after testing
+  if (state !== 'final' && state !== 'live') {
+    console.log(`🔍 Game state="${state}" away="${away}" home="${home}" startTime="${g.startTime}" startTimeEpoch="${g.startTimeEpoch}"`);
+  }
+
   if (state === 'final') {
     // Skip games with missing scores
     if (!awayScore || !homeScore) return null;
