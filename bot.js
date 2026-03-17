@@ -1036,13 +1036,53 @@ async function fetchMlbTeamScore(teamAbbrev, dateStr = null) {
 }
 
 // MLB Standings by division
-async function fetchMlbStandings(leagueFilter = null) {
+// MLB Opening Day — update each season
+const MLB_OPENING_DAY = new Date('2026-03-25T00:00:00');
+
+// Resolve season and date params for standings
+// Returns { season, dateParam, label }
+function resolveMlbStandingsSeason(argStr) {
+  if (!argStr) {
+    // Smart default: before Opening Day → show 2025 final, otherwise current
+    const now = new Date();
+    if (now < MLB_OPENING_DAY) {
+      return { season: '2025', dateParam: null, label: '2025 Final' };
+    }
+    return { season: String(now.getFullYear()), dateParam: null, label: null };
+  }
+
+  // Explicit 4-digit year e.g. "2025"
+  const yearMatch = argStr.match(/\b(20\d{2})\b/);
+  if (yearMatch && !argStr.includes('-', 5)) {
+    const yr = yearMatch[1];
+    return { season: yr, dateParam: null, label: `${yr} Final` };
+  }
+
+  // Explicit date e.g. "2026-04-15"
+  const dateMatch = argStr.match(/(\d{4}-\d{2}-\d{2})/);
+  if (dateMatch) {
+    const d = new Date(dateMatch[1] + 'T12:00:00');
+    const season = String(d.getFullYear());
+    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return { season, dateParam: dateMatch[1], label: `as of ${label}` };
+  }
+
+  // Fallback — treat as current
+  const now = new Date();
+  return { season: String(now.getFullYear()), dateParam: null, label: null };
+}
+
+async function fetchMlbStandings(leagueFilter = null, argStr = null) {
   // leagueId: 103 = AL, 104 = NL
   const leagueIds = leagueFilter === 'AL' ? '103'
                   : leagueFilter === 'NL' ? '104'
                   : '103,104';
 
-  const url = `https://statsapi.mlb.com/api/v1/standings?leagueId=${leagueIds}&season=${new Date().getFullYear()}&standingsTypes=regularSeason&hydrate=team`;
+  const { season, dateParam, label } = resolveMlbStandingsSeason(argStr);
+
+  let url = `https://statsapi.mlb.com/api/v1/standings?leagueId=${leagueIds}&season=${season}&standingsTypes=regularSeason&hydrate=team`;
+  if (dateParam) url += `&date=${dateParam}`;
+
   console.log(`📊 Fetching MLB standings: ${url}`);
 
   const res = await axios.get(url, { timeout: 8000 });
@@ -1051,7 +1091,8 @@ async function fetchMlbStandings(leagueFilter = null) {
   if (records.length === 0) return '📊 Standings not available yet.';
 
   const filterLabel = leagueFilter ? ` — ${leagueFilter}` : '';
-  let output = `📊 *MLB Standings${filterLabel}*\n───\n`;
+  const seasonLabel = label ? ` (${label})` : '';
+  let output = `📊 *MLB Standings${filterLabel}${seasonLabel}*\n───\n`;
 
   // Sort divisions in our preferred order
   const divOrder = Object.keys(MLB_DIVISION_ORDER);
@@ -1072,8 +1113,8 @@ async function fetchMlbStandings(leagueFilter = null) {
       const l = t.losses ?? '-';
       const pct = t.winningPercentage ? Number(t.winningPercentage).toFixed(3) : '---';
       const gb = t.gamesBack === '-' || t.gamesBack == null ? ' —' : ` ${t.gamesBack}`;
-      const streak = t.streak?.streakCode || '';
-      output += `  ${name.padEnd(4)} ${String(w).padStart(2)}-${String(l).padEnd(2)}  .${pct.replace('0.','')}  GB:${gb}  ${streak}\n`;
+      const streak = label ? '' : (t.streak?.streakCode || ''); // no streak for historical
+      output += `  ${name.padEnd(4)} ${String(w).padStart(2)}-${String(l).padEnd(2)}  .${pct.replace('0.','')}  GB:${gb}${streak ? '  ' + streak : ''}\n`;
     }
   }
 
@@ -1167,9 +1208,11 @@ const HELP_TEXT = [
   '/mlb al — Full American League',
   '/mlb nl — Full National League',
   '/mlb YYYY-MM-DD — Specific date',
-  '/mlbstandings — Full standings',
+  '/mlbstandings — Full standings (smart default)',
   '/mlbstandings al — AL only',
   '/mlbstandings nl — NL only',
+  '/mlbstandings 2025 — Full 2025 final standings',
+  '/mlbstandings 2026-04-15 — Standings as of date',
   '',
   'ℹ️ General',
   '/start — Bot status',
@@ -1555,12 +1598,21 @@ bot.onText(/\/mlb(?:\s+(.+))?$/, async (msg, match) => {
 
 bot.onText(/\/mlbstandings(?:\s+(.+))?$/, async (msg, match) => {
   const chatId = msg.chat.id;
-  const argStr = (match[1] || '').trim().toUpperCase();
-  const leagueFilter = argStr === 'AL' ? 'AL' : argStr === 'NL' ? 'NL' : null;
+  const argStr = (match[1] || '').trim();
+
+  // Extract league filter (AL/NL) separately from date/year args
+  const upper = argStr.toUpperCase();
+  const leagueFilter = upper.startsWith('AL') ? 'AL'
+                     : upper.startsWith('NL') ? 'NL'
+                     : null;
+
+  // Pass the full argStr to the function for date/year parsing
+  // Strip the league prefix so season resolver doesn't get confused
+  const seasonArg = argStr.replace(/^(al|nl)\s*/i, '').trim() || null;
 
   try {
     await bot.sendMessage(chatId, '📊 Fetching MLB standings...');
-    const result = await fetchMlbStandings(leagueFilter);
+    const result = await fetchMlbStandings(leagueFilter, seasonArg);
     await sendChunked(chatId, result, { parse_mode: 'Markdown' });
   } catch (error) {
     console.error('✗ /mlbstandings error:', error.message);
@@ -1846,7 +1898,13 @@ function parseSmsCommand(body) {
     const leagueFilter = text.includes('al ') || text === 'al standings' ? 'AL'
                        : text.includes('nl ') || text === 'nl standings' ? 'NL'
                        : null;
-    return { sport: 'mlb_standings', leagueFilter, division: null, dateStr, confFilter: null };
+    // Extract year or date if present e.g. "mlb standings 2025" or "standings 2026-04-15"
+    const yearMatch = text.match(/\b(20\d{2})\b/);
+    const dateInStandings = text.match(/(\d{4}-\d{2}-\d{2})/);
+    const seasonArg = dateInStandings ? dateInStandings[1]
+                    : yearMatch ? yearMatch[1]
+                    : null;
+    return { sport: 'mlb_standings', leagueFilter, seasonArg, division: null, dateStr, confFilter: null };
   }
 
   // MLB team lookup — e.g. "cubs score" "yankees" "nyy"
@@ -1957,7 +2015,7 @@ smsApp.post('/sms', async (req, res) => {
 
     // MLB standings
     if (sport === 'mlb_standings') {
-      const raw = await fetchMlbStandings(parsed.leagueFilter || null);
+      const raw = await fetchMlbStandings(parsed.leagueFilter || null, parsed.seasonArg || null);
       await sendSms(from, stripMarkdown(raw));
       return;
     }
