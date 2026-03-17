@@ -1089,7 +1089,17 @@ function resolveMlbStandingsSeason(argStr) {
   return { season: String(now.getFullYear()), dateParam: null, label: null };
 }
 
-// Maps full MLB API division names → short display names
+// MLB division ID → short display name (stable MLB Stats API constants)
+const MLB_DIVISION_ID_MAP = {
+  200: 'AL West',
+  201: 'AL East',
+  202: 'AL Central',
+  203: 'NL West',
+  204: 'NL East',
+  205: 'NL Central',
+};
+
+// Maps full MLB API division names → short display names (used by scores endpoint)
 const MLB_DIVISION_NAME_MAP = {
   'American League East':    'AL East',
   'American League Central': 'AL Central',
@@ -1121,22 +1131,18 @@ async function fetchMlbStandings(leagueFilter = null, argStr = null) {
   const seasonLabel = label ? ` (${label})` : '';
   let output = `📊 *MLB Standings${filterLabel}${seasonLabel}*\n───\n`;
 
-  // Sort divisions in our preferred order using mapped short names
+  // Sort divisions in our preferred order using ID-based names
   const divOrder = Object.keys(MLB_DIVISION_ORDER);
   records.sort((a, b) => {
-    const aFull = a.division?.name || '';
-    const bFull = b.division?.name || '';
-    const aShort = MLB_DIVISION_NAME_MAP[aFull] || aFull;
-    const bShort = MLB_DIVISION_NAME_MAP[bFull] || bFull;
-    const aIdx = divOrder.indexOf(aShort);
-    const bIdx = divOrder.indexOf(bShort);
+    const aName = MLB_DIVISION_ID_MAP[a.division?.id] || '';
+    const bName = MLB_DIVISION_ID_MAP[b.division?.id] || '';
+    const aIdx = divOrder.indexOf(aName);
+    const bIdx = divOrder.indexOf(bName);
     return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
   });
 
   for (const divRecord of records) {
-    const fullName = divRecord.division?.name || '';
-    console.log(`📊 Division object: ${JSON.stringify(divRecord.division)}`);
-    const divName = MLB_DIVISION_NAME_MAP[fullName] || fullName || 'Division';
+    const divName = MLB_DIVISION_ID_MAP[divRecord.division?.id] || 'Division';
     output += `\n*${divName}*\n`;
 
     const teams = divRecord.teamRecords || [];
