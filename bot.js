@@ -648,7 +648,6 @@ function formatScoreLine(g) {
   const homeDisplay = displayName(home);
 
   if (state === 'final') {
-    // Skip games with missing scores
     if (!awayScore || !homeScore) return null;
     const awayBold = g.away?.winner ? `*${awayDisplay}*` : awayDisplay;
     const homeBold = g.home?.winner ? `*${homeDisplay}*` : homeDisplay;
@@ -656,8 +655,9 @@ function formatScoreLine(g) {
   } else if (state === 'live') {
     return `${awayDisplay} ${awayScore}, ${homeDisplay} ${homeScore} — ${period}`;
   } else {
-    const time = g.startTime || 'TBA';
-    return `${awayDisplay} vs ${homeDisplay} — ${time}`;
+    // Scheduled — show time if known, otherwise just matchup
+    const time = g.startTime && g.startTime !== 'TBA' ? ` ${g.startTime}` : '';
+    return `${awayDisplay} @ ${homeDisplay}${time}`;
   }
 }
 
@@ -711,9 +711,9 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
       for (const state of ['final', 'live', 'pre']) {
         const group = coverageGames.filter(g => g.gameState === state);
         if (group.length > 0) {
-          const label = state === 'live' ? 'LIVE' : state === 'pre' ? 'SCHEDULED' : 'FINAL';
-          output += `\n${label}\n`;
-          group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+          const label = state === 'live' ? 'LIVE' : state === 'pre' ? 'Scheduled' : 'Final';
+          const lines = group.map(g => formatScoreLine(g)).filter(Boolean);
+          if (lines.length) output += `${label}: ${lines.join(' | ')}\n`;
         }
       }
     }
@@ -767,24 +767,29 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
         if (matchedConf) {
           output += `\n📋 *${matchedConf}*\n`;
           const confGames = byConf[matchedConf];
+          const lines = [];
           for (const state of ['live', 'final', 'pre']) {
             confGames
               .filter(g => g.gameState === state)
-              .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+              .forEach(g => { const line = formatScoreLine(g); if (line) lines.push(line); });
           }
+          output += lines.join('\n') + '\n';
         } else {
           output += `\n❌ Conference "${confFilter}" not found today.\nTry: acc, big ten, sec, mvc, big 12, pac-12, american, cusa, mac, sun belt, horizon, summit, wcc, wac, patriot, ivy, maac, asun, caa, southern, southland\n`;
         }
       } else {
         output += `\n📋 *All Other D1 Games*\n`;
         for (const conf of Object.keys(byConf).sort()) {
-          output += `\n${conf}\n`;
           const confGames = byConf[conf];
+          // Collect all game lines for this conference
+          const lines = [];
           for (const state of ['live', 'final', 'pre']) {
             confGames
               .filter(g => g.gameState === state)
-              .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+              .forEach(g => { const line = formatScoreLine(g); if (line) lines.push(line); });
           }
+          if (lines.length === 0) continue;
+          output += `\n*${conf}*\n${lines.join('\n')}\n`;
         }
       }
     }
@@ -806,9 +811,9 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
     for (const state of ['live', 'final', 'pre']) {
       const group = regionalGames.filter(g => g.gameState === state);
       if (group.length > 0) {
-        const label = state === 'live' ? 'LIVE' : state === 'pre' ? 'SCHEDULED' : 'FINAL';
-        output += `\n${label}\n`;
-        group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+        const label = state === 'live' ? 'LIVE' : state === 'pre' ? 'Scheduled' : 'Final';
+        const lines = group.map(g => formatScoreLine(g)).filter(Boolean);
+        if (lines.length) output += `${label}: ${lines.join(' | ')}\n`;
       }
     }
   }
