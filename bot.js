@@ -1109,11 +1109,17 @@ const MLB_DIVISION_NAME_MAP = {
   'National League West':    'NL West',
 };
 
-async function fetchMlbStandings(leagueFilter = null, argStr = null) {
-  // leagueId: 103 = AL, 104 = NL
-  const leagueIds = leagueFilter === 'AL' ? '103'
-                  : leagueFilter === 'NL' ? '104'
-                  : '103,104';
+async function fetchMlbStandings(leagueFilter = null, argStr = null, divisionFilter = null) {
+  // If filtering to a single division, determine which league to fetch
+  // e.g. divisionFilter = 'NL East' → only need leagueId 104
+  let leagueIds;
+  if (divisionFilter) {
+    leagueIds = divisionFilter.startsWith('AL') ? '103' : '104';
+  } else {
+    leagueIds = leagueFilter === 'AL' ? '103'
+              : leagueFilter === 'NL' ? '104'
+              : '103,104';
+  }
 
   const { season, dateParam, label } = resolveMlbStandingsSeason(argStr);
 
@@ -1127,7 +1133,9 @@ async function fetchMlbStandings(leagueFilter = null, argStr = null) {
 
   if (records.length === 0) return '📊 Standings not available yet.';
 
-  const filterLabel = leagueFilter ? ` — ${leagueFilter}` : '';
+  const filterLabel = divisionFilter ? ` — ${divisionFilter}`
+                    : leagueFilter  ? ` — ${leagueFilter}`
+                    : '';
   const seasonLabel = label ? ` (${label})` : '';
   let output = `📊 *MLB Standings${filterLabel}${seasonLabel}*\n───\n`;
 
@@ -1143,18 +1151,30 @@ async function fetchMlbStandings(leagueFilter = null, argStr = null) {
 
   for (const divRecord of records) {
     const divName = MLB_DIVISION_ID_MAP[divRecord.division?.id] || 'Division';
-    output += `\n*${divName}*\n`;
+
+    // Skip divisions that don't match the division filter
+    if (divisionFilter && divName !== divisionFilter) continue;
+
+    // Division header as bold markdown, team rows in monospace code block
+    output += `\n*${divName}*\n\`\`\`\n`;
+    output += `${'Team'.padEnd(5)} ${'W'.padStart(2)}-${'L'.padEnd(2)}  PCT    GB\n`;
+    output += `${'-'.repeat(27)}\n`;
 
     const teams = divRecord.teamRecords || [];
     for (const t of teams) {
-      const name = t.team?.abbreviation || t.team?.teamName || '?';
-      const w = t.wins ?? '-';
-      const l = t.losses ?? '-';
-      const pct = t.winningPercentage ? Number(t.winningPercentage).toFixed(3) : '---';
-      const gb = t.gamesBack === '-' || t.gamesBack == null ? ' —' : ` ${t.gamesBack}`;
+      const name = (t.team?.abbreviation || t.team?.teamName || '?').padEnd(5);
+      const w = String(t.wins ?? '-').padStart(2);
+      const l = String(t.losses ?? '-').padEnd(2);
+      const pct = t.winningPercentage
+        ? '.' + Number(t.winningPercentage).toFixed(3).slice(2)
+        : '.---';
+      const gb = t.gamesBack === '-' || t.gamesBack == null
+        ? '  —  '
+        : String(t.gamesBack).padStart(4) + ' ';
       const streak = label ? '' : (t.streak?.streakCode || '');
-      output += `  ${name.padEnd(4)} ${String(w).padStart(2)}-${String(l).padEnd(2)}  .${pct.replace('0.','')}  GB:${gb}${streak ? '  ' + streak : ''}\n`;
+      output += `${name} ${w}-${l}  ${pct.padEnd(4)}  ${gb}${streak ? '  ' + streak : ''}\n`;
     }
+    output += '```\n';
   }
 
   return output;
@@ -1250,6 +1270,8 @@ const HELP_TEXT = [
   '/mlbstandings — Full standings (smart default)',
   '/mlbstandings al — AL only',
   '/mlbstandings nl — NL only',
+  '/mlbstandings nl east — Single division',
+  '/mlbstandings al central — Single division',
   '/mlbstandings 2025 — Full 2025 final standings',
   '/mlbstandings 2026-04-15 — Standings as of date',
   '',
@@ -1638,20 +1660,33 @@ bot.onText(/\/mlb(?:\s+(.+))?$/, async (msg, match) => {
 bot.onText(/\/mlbstandings(?:\s+(.+))?$/, async (msg, match) => {
   const chatId = msg.chat.id;
   const argStr = (match[1] || '').trim();
+  const lower = argStr.toLowerCase();
 
-  // Extract league filter (AL/NL) separately from date/year args
+  // Try full division filter first — e.g. "nl east", "al central"
+  const divisionFilter = resolveMlbDivisionFilter(lower);
+
+  // League-only filter — e.g. "al", "nl" (only if no full division matched)
   const upper = argStr.toUpperCase();
-  const leagueFilter = upper.startsWith('AL') ? 'AL'
-                     : upper.startsWith('NL') ? 'NL'
-                     : null;
+  const leagueFilter = !divisionFilter
+    ? (upper.startsWith('AL') ? 'AL' : upper.startsWith('NL') ? 'NL' : null)
+    : null;
 
-  // Pass the full argStr to the function for date/year parsing
-  // Strip the league prefix so season resolver doesn't get confused
-  const seasonArg = argStr.replace(/^(al|nl)\s*/i, '').trim() || null;
+  // Season/date arg — strip any league or division keywords before parsing
+  const seasonArg = argStr
+    .replace(/^(al east|al central|al west|nl east|nl central|nl west|al|nl)\s*/i, '')
+    .trim() || null;
 
   try {
     await bot.sendMessage(chatId, '📊 Fetching MLB standings...');
-    const result = await fetchMlbStandings(leagueFilter, seasonArg);
+
+    let result;
+    if (divisionFilter) {
+      // Single division — fetch full standings then filter output to that division
+      result = await fetchMlbStandings(null, seasonArg, divisionFilter);
+    } else {
+      result = await fetchMlbStandings(leagueFilter, seasonArg, null);
+    }
+
     await sendChunked(chatId, result, { parse_mode: 'Markdown' });
   } catch (error) {
     console.error('✗ /mlbstandings error:', error.message);
