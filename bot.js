@@ -785,6 +785,9 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
         for (const conf of Object.keys(byConf).sort()) {
           output += `\n${conf}\n`;
           const confGames = byConf[conf];
+          // Debug — log unique gameState values seen
+          const states = [...new Set(confGames.map(g => g.gameState))];
+          console.log(`🔍 ${conf}: ${confGames.length} games, states: ${JSON.stringify(states)}, sample startTime: "${confGames[0]?.startTime}"`);
           for (const state of ['live', 'final', 'preview']) {
             confGames
               .filter(g => g.gameState === state)
