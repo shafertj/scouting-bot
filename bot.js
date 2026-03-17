@@ -1135,6 +1135,7 @@ async function fetchMlbStandings(leagueFilter = null, argStr = null) {
 
   for (const divRecord of records) {
     const fullName = divRecord.division?.name || '';
+    console.log(`📊 Division object: ${JSON.stringify(divRecord.division)}`);
     const divName = MLB_DIVISION_NAME_MAP[fullName] || fullName || 'Division';
     output += `\n*${divName}*\n`;
 
