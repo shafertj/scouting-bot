@@ -647,11 +647,6 @@ function formatScoreLine(g) {
   const awayDisplay = displayName(away);
   const homeDisplay = displayName(home);
 
-  // Debug — remove after testing
-  if (state !== 'final' && state !== 'live') {
-    console.log(`🔍 Game state="${state}" away="${away}" home="${home}" startTime="${g.startTime}" startTimeEpoch="${g.startTimeEpoch}"`);
-  }
-
   if (state === 'final') {
     // Skip games with missing scores
     if (!awayScore || !homeScore) return null;
@@ -713,10 +708,10 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
     // Coverage section
     if (coverageGames.length > 0) {
       output += `\n🎯 *Your Coverage*\n`;
-      for (const state of ['final', 'live', 'preview']) {
+      for (const state of ['final', 'live', 'pre']) {
         const group = coverageGames.filter(g => g.gameState === state);
         if (group.length > 0) {
-          const label = state === 'live' ? 'LIVE' : state === 'preview' ? 'SCHEDULED' : 'FINAL';
+          const label = state === 'live' ? 'LIVE' : state === 'pre' ? 'SCHEDULED' : 'FINAL';
           output += `\n${label}\n`;
           group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
         }
@@ -772,7 +767,7 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
         if (matchedConf) {
           output += `\n📋 *${matchedConf}*\n`;
           const confGames = byConf[matchedConf];
-          for (const state of ['live', 'final', 'preview']) {
+          for (const state of ['live', 'final', 'pre']) {
             confGames
               .filter(g => g.gameState === state)
               .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
@@ -785,10 +780,7 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
         for (const conf of Object.keys(byConf).sort()) {
           output += `\n${conf}\n`;
           const confGames = byConf[conf];
-          // Debug — log unique gameState values seen
-          const states = [...new Set(confGames.map(g => g.gameState))];
-          console.log(`🔍 ${conf}: ${confGames.length} games, states: ${JSON.stringify(states)}, sample startTime: "${confGames[0]?.startTime}"`);
-          for (const state of ['live', 'final', 'preview']) {
+          for (const state of ['live', 'final', 'pre']) {
             confGames
               .filter(g => g.gameState === state)
               .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
@@ -811,10 +803,10 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
     }
 
     output += `\n🎯 *Regional ${divLabel} Games (IL/WI/IA/MN/ND/SD)*\n`;
-    for (const state of ['live', 'final', 'preview']) {
+    for (const state of ['live', 'final', 'pre']) {
       const group = regionalGames.filter(g => g.gameState === state);
       if (group.length > 0) {
-        const label = state === 'live' ? 'LIVE' : state === 'preview' ? 'SCHEDULED' : 'FINAL';
+        const label = state === 'live' ? 'LIVE' : state === 'pre' ? 'SCHEDULED' : 'FINAL';
         output += `\n${label}\n`;
         group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
       }
@@ -1519,7 +1511,7 @@ async function fetchNcaaScoresMultiDay(division, dateStr, daysAhead, confFilter)
 
       if (dayGames.length > 0) {
         let dayOutput = `\n📅 *${dayLabel}*\n`;
-        for (const state of ['live', 'final', 'preview']) {
+        for (const state of ['live', 'final', 'pre']) {
           dayGames
             .filter(g => g.gameState === state)
             .forEach(g => {
