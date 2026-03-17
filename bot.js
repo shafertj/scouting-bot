@@ -968,14 +968,31 @@ async function fetchMlbScores(dateStr = null, divFilter = null) {
 
   if (games.length === 0) return output + 'No games today.';
 
-  // Group by division
+  // Double-sort: each game appears under BOTH teams' divisions
   const byDiv = {};
   for (const g of games) {
     const awayAbbrev = g.teams?.away?.team?.abbreviation || '';
     const homeAbbrev = g.teams?.home?.team?.abbreviation || '';
-    const div = getMlbDivision(awayAbbrev) || getMlbDivision(homeAbbrev) || 'Other';
-    if (!byDiv[div]) byDiv[div] = [];
-    byDiv[div].push(g);
+    const awayDiv = getMlbDivision(awayAbbrev);
+    const homeDiv = getMlbDivision(homeAbbrev);
+
+    // Add under away team's division
+    if (awayDiv && awayDiv !== 'Other') {
+      if (!byDiv[awayDiv]) byDiv[awayDiv] = [];
+      byDiv[awayDiv].push(g);
+    }
+
+    // Add under home team's division if different
+    if (homeDiv && homeDiv !== 'Other' && homeDiv !== awayDiv) {
+      if (!byDiv[homeDiv]) byDiv[homeDiv] = [];
+      byDiv[homeDiv].push(g);
+    }
+
+    // Fallback if neither team resolved
+    if ((!awayDiv || awayDiv === 'Other') && (!homeDiv || homeDiv === 'Other')) {
+      if (!byDiv['Other']) byDiv['Other'] = [];
+      byDiv['Other'].push(g);
+    }
   }
 
   // Determine which divisions to show
@@ -1072,6 +1089,16 @@ function resolveMlbStandingsSeason(argStr) {
   return { season: String(now.getFullYear()), dateParam: null, label: null };
 }
 
+// Maps full MLB API division names → short display names
+const MLB_DIVISION_NAME_MAP = {
+  'American League East':    'AL East',
+  'American League Central': 'AL Central',
+  'American League West':    'AL West',
+  'National League East':    'NL East',
+  'National League Central': 'NL Central',
+  'National League West':    'NL West',
+};
+
 async function fetchMlbStandings(leagueFilter = null, argStr = null) {
   // leagueId: 103 = AL, 104 = NL
   const leagueIds = leagueFilter === 'AL' ? '103'
@@ -1094,16 +1121,21 @@ async function fetchMlbStandings(leagueFilter = null, argStr = null) {
   const seasonLabel = label ? ` (${label})` : '';
   let output = `📊 *MLB Standings${filterLabel}${seasonLabel}*\n───\n`;
 
-  // Sort divisions in our preferred order
+  // Sort divisions in our preferred order using mapped short names
   const divOrder = Object.keys(MLB_DIVISION_ORDER);
   records.sort((a, b) => {
-    const aName = a.division?.nameShort || a.division?.name || '';
-    const bName = b.division?.nameShort || b.division?.name || '';
-    return divOrder.indexOf(aName) - divOrder.indexOf(bName);
+    const aFull = a.division?.name || '';
+    const bFull = b.division?.name || '';
+    const aShort = MLB_DIVISION_NAME_MAP[aFull] || aFull;
+    const bShort = MLB_DIVISION_NAME_MAP[bFull] || bFull;
+    const aIdx = divOrder.indexOf(aShort);
+    const bIdx = divOrder.indexOf(bShort);
+    return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
   });
 
   for (const divRecord of records) {
-    const divName = divRecord.division?.nameShort || divRecord.division?.name || 'Unknown';
+    const fullName = divRecord.division?.name || '';
+    const divName = MLB_DIVISION_NAME_MAP[fullName] || fullName || 'Division';
     output += `\n*${divName}*\n`;
 
     const teams = divRecord.teamRecords || [];
@@ -1113,7 +1145,7 @@ async function fetchMlbStandings(leagueFilter = null, argStr = null) {
       const l = t.losses ?? '-';
       const pct = t.winningPercentage ? Number(t.winningPercentage).toFixed(3) : '---';
       const gb = t.gamesBack === '-' || t.gamesBack == null ? ' —' : ` ${t.gamesBack}`;
-      const streak = label ? '' : (t.streak?.streakCode || ''); // no streak for historical
+      const streak = label ? '' : (t.streak?.streakCode || '');
       output += `  ${name.padEnd(4)} ${String(w).padStart(2)}-${String(l).padEnd(2)}  .${pct.replace('0.','')}  GB:${gb}${streak ? '  ' + streak : ''}\n`;
     }
   }
