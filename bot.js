@@ -654,6 +654,7 @@ function normalizeEspnGame(event) {
       winner: homeComp.winner || false,
     },
     state,   // 'pre' | 'in' | 'post'
+    completed: status?.completed ?? false,
     detail: status?.shortDetail || '',  // e.g. "Bot 8th", "Final", "6:00 PM ET"
     date: event.date || '',
   };
@@ -666,6 +667,7 @@ function formatScoreLine(g) {
   const homeDisplay = displayName(homeAbbrev);
 
   if (g.state === 'post') {
+    if (!g.completed) return `⛈ ${awayDisplay} vs ${homeDisplay} — PPD`;
     const awayScore = g.away?.score || '';
     const homeScore = g.home?.score || '';
     if (!awayScore || !homeScore) return null;
