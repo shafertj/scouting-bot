@@ -3,7 +3,6 @@ import { google } from 'googleapis';
 import Anthropic from '@anthropic-ai/sdk';
 import cron from 'node-cron';
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -19,6 +18,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
+
 const OAUTH_CREDENTIALS_JSON = process.env.OAUTH_CREDENTIALS || fs.readFileSync(path.join(__dirname, 'credentials.json'), 'utf8');
 const TOKEN_PATH = path.join(__dirname, 'token.json');
 const SCOPES = [
@@ -597,25 +597,25 @@ function isRegionalD3(name) {
   return D3_REGIONAL_KEYWORDS.some(kw => lower.includes(kw));
 }
 
-// Exact team name mappings from NCAA API → your coverage teams
-// Key: what the NCAA API returns, Value: your display name
+// Coverage team display names keyed by ESPN abbreviation
+// Use /scores debug or ESPN scoreboard to verify abbreviations
 const NCAA_TEAM_MAP = {
-  'North Dakota St.': 'NDSU',
-  'South Dakota St.': 'SDSU',
-  'Illinois St.': 'Illinois St',
-  'Western Ill.': 'WIU',
-  'Southern Ill.': 'SIU',
-  'Eastern Illinois': 'EIU',
-  'Northwestern': 'Northwestern',
-  'Milwaukee': 'Milwaukee',
-  'Iowa': 'Iowa',
-  'Illinois': 'Illinois',
-  'Minnesota': 'Minnesota',
+  'NDSU': 'NDSU',
+  'SDSU': 'SDSU',
+  'ILL': 'Illinois',
+  'ILST': 'Illinois St',
+  'WIU': 'WIU',
+  'SIU': 'SIU',
+  'EIU': 'EIU',
+  'NW': 'Northwestern',
+  'MIL': 'Milwaukee',
+  'IOWA': 'Iowa',
+  'MINN': 'Minnesota',
   'SIUE': 'SIUE',
   'UIC': 'UIC',
-  'Bradley': 'Bradley',
+  'BRAD': 'Bradley',
   'NIU': 'NIU',
-  'St. Thomas (MN)': 'St. Thomas',
+  'STTH': 'St. Thomas',
 };
 
 function isCoverageTeam(name) {
@@ -626,28 +626,65 @@ function displayName(name) {
   return NCAA_TEAM_MAP[name] || name;
 }
 
+// ─── ESPN Game Normalization ──────────────────────────────────────────────────
+// Normalize an ESPN scoreboard event into a common game object
+function normalizeEspnGame(event) {
+  const comp = event.competitions?.[0];
+  if (!comp) return null;
+
+  const awayComp = comp.competitors.find(c => c.homeAway === 'away');
+  const homeComp = comp.competitors.find(c => c.homeAway === 'home');
+  if (!awayComp || !homeComp) return null;
+
+  const status = event.status?.type;
+  const state = status?.state || 'pre'; // 'pre', 'in', 'post'
+
+  return {
+    _espn: true,
+    away: {
+      abbrev: awayComp.team?.abbreviation || '',
+      name: awayComp.team?.displayName || '',
+      score: awayComp.score || '0',
+      winner: awayComp.winner || false,
+    },
+    home: {
+      abbrev: homeComp.team?.abbreviation || '',
+      name: homeComp.team?.displayName || '',
+      score: homeComp.score || '0',
+      winner: homeComp.winner || false,
+    },
+    state,   // 'pre' | 'in' | 'post'
+    detail: status?.shortDetail || '',  // e.g. "Bot 8th", "Final", "6:00 PM ET"
+    date: event.date || '',
+  };
+}
+
 function formatScoreLine(g) {
-  const away = g.away?.names?.short || '';
-  const home = g.home?.names?.short || '';
-  const awayScore = g.away?.score || '';
-  const homeScore = g.home?.score || '';
-  const state = g.gameState || '';
-  const period = g.currentPeriod || '';
+  const awayAbbrev = g.away?.abbrev || '';
+  const homeAbbrev = g.home?.abbrev || '';
+  const awayDisplay = displayName(awayAbbrev);
+  const homeDisplay = displayName(homeAbbrev);
 
-  const awayDisplay = displayName(away);
-  const homeDisplay = displayName(home);
-
-  if (state === 'final') {
+  if (g.state === 'post') {
+    const awayScore = g.away?.score || '';
+    const homeScore = g.home?.score || '';
     if (!awayScore || !homeScore) return null;
     const awayBold = g.away?.winner ? `*${awayDisplay}*` : awayDisplay;
     const homeBold = g.home?.winner ? `*${homeDisplay}*` : homeDisplay;
     return `${awayBold} ${awayScore}, ${homeBold} ${homeScore}`;
-  } else if (state === 'live') {
-    return `${awayDisplay} ${awayScore}, ${homeDisplay} ${homeScore} — ${period}`;
+  } else if (g.state === 'in') {
+    return `🔴 ${awayDisplay} ${g.away?.score}, ${homeDisplay} ${g.home?.score} — ${g.detail}`;
   } else {
-    // Scheduled — show time if known, otherwise just matchup
-    const time = g.startTime && g.startTime !== 'TBA' ? ` ${g.startTime}` : '';
-    return `${awayDisplay} @ ${homeDisplay}${time}`;
+    // Format time from UTC date string to CST
+    let timeStr = g.detail || 'TBA';
+    if (g.date) {
+      try {
+        timeStr = new Date(g.date).toLocaleTimeString('en-US', {
+          hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'America/Chicago'
+        });
+      } catch (_) {}
+    }
+    return `${awayDisplay} @ ${homeDisplay} — ${timeStr}`;
   }
 }
 
@@ -663,513 +700,127 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
   const yyyy = targetDate.getFullYear();
   const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
   const dd = String(targetDate.getDate()).padStart(2, '0');
-  const url = `https://ncaa-api.henrygd.me/scoreboard/baseball/${division}/${yyyy}/${mm}/${dd}/all-conf`;
 
-  console.log(`⚾ Fetching ${division.toUpperCase()} scores: ${url}`);
-
-  const res = await axios.get(url, {
-    timeout: 8000,
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-  });
-
-  const games = (res.data?.games || []).map(g => g.game);
+  // ESPN only has D1 college baseball — D2/D3 still use NCAA API
+  let games = [];
   const divLabel = division.toUpperCase();
-
   const dateLabel = targetDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
   let output = `⚾ *NCAA ${divLabel} Scores — ${dateLabel}*\n───\n`;
+
+  if (division === 'd1') {
+    const url = `https://site.api.espn.com/apis/site/v2/sports/baseball/college-baseball/scoreboard?dates=${yyyy}${mm}${dd}&limit=300`;
+    console.log(`⚾ Fetching D1 scores (ESPN): ${url}`);
+    const res = await axios.get(url, { timeout: 8000 });
+    const events = res.data?.events || [];
+    games = events.map(normalizeEspnGame).filter(Boolean);
+  } else {
+    // D2/D3: NCAA API (ESPN doesn't cover these)
+    const url = `https://ncaa-api.henrygd.me/scoreboard/baseball/${division}/${yyyy}/${mm}/${dd}/all-conf`;
+    console.log(`⚾ Fetching ${divLabel} scores (NCAA API): ${url}`);
+    const res = await axios.get(url, {
+      timeout: 8000,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+    });
+    // Normalize NCAA API format to match our common shape
+    games = (res.data?.games || []).map(item => {
+      const g = item.game;
+      if (!g) return null;
+      const ncaaState = g.gameState || 'pre';
+      // Map NCAA states to ESPN states for unified downstream logic
+      const state = ncaaState === 'final' ? 'post' : ncaaState === 'live' ? 'in' : 'pre';
+      return {
+        away: { abbrev: g.away?.names?.short || '', name: g.away?.names?.full || '', score: g.away?.score || '0', winner: g.away?.winner || false },
+        home: { abbrev: g.home?.names?.short || '', name: g.home?.names?.full || '', score: g.home?.score || '0', winner: g.home?.winner || false },
+        state,
+        detail: g.currentPeriod || '',
+        date: g.startTime || '',
+        _ncaaConf: {
+          away: g.away?.conferences?.[0] || null,
+          home: g.home?.conferences?.[0] || null,
+        }
+      };
+    }).filter(Boolean);
+  }
 
   if (games.length === 0) return output + 'No games found.';
 
   if (division === 'd1') {
-    // D1: Coverage teams first, then all others grouped by conference
+    // Coverage teams first
     const coverageGames = [];
     const otherGames = [];
 
     for (const g of games) {
-      const away = g.away?.names?.short || '';
-      const home = g.home?.names?.short || '';
-      if (isCoverageTeam(away) || isCoverageTeam(home)) {
+      if (isCoverageTeam(g.away.abbrev) || isCoverageTeam(g.home.abbrev)) {
         coverageGames.push(g);
       } else {
         otherGames.push(g);
       }
     }
 
-    // Coverage section
     if (coverageGames.length > 0) {
       output += `\n🎯 *Your Coverage*\n`;
-      for (const state of ['final', 'live', 'pre']) {
-        const group = coverageGames.filter(g => g.gameState === state);
+      for (const state of ['post', 'in', 'pre']) {
+        const group = coverageGames.filter(g => g.state === state);
         if (group.length > 0) {
-          const label = state === 'live' ? 'LIVE' : state === 'pre' ? 'Scheduled' : 'Final';
-          const lines = group.map(g => formatScoreLine(g)).filter(Boolean);
-          if (lines.length) output += `${label}: ${lines.join(' | ')}\n`;
+          const label = state === 'in' ? 'LIVE' : state === 'pre' ? 'SCHEDULED' : 'FINAL';
+          output += `\n${label}\n`;
+          group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
         }
       }
     }
 
-    // All other D1 games grouped by conference
+    // All other D1 — flat list for now (conference sorting TBD)
     if (otherGames.length > 0) {
-      // Build conference → games map
-      // Conference name formatting from SEO slug
-      const confSeoToName = {
-        'acc': 'ACC', 'big-12': 'Big 12', 'big-ten': 'Big Ten', 'big-east': 'Big East',
-        'sec': 'SEC', 'pac-12': 'Pac-12', 'american': 'American', 'cusa': 'C-USA',
-        'mac': 'MAC', 'mwc': 'Mountain West', 'sun-belt': 'Sun Belt',
-        'mvc': 'Missouri Valley', 'horizon': 'Horizon', 'summit': 'Summit League',
-        'big-south': 'Big South', 'southern': 'Southern', 'southland': 'Southland',
-        'wac': 'WAC', 'wcc': 'WCC', 'patriot': 'Patriot', 'ivy': 'Ivy League',
-        'maac': 'MAAC', 'a-sun': 'ASUN', 'caa': 'CAA', 'meac': 'MEAC',
-        'swac': 'SWAC', 'nec': 'NEC', 'ovc': 'OVC', 'big-west': 'Big West',
-        'america-east': 'America East', 'atlantic-10': 'Atlantic 10',
-        'atlantic-sun': 'ASUN', 'ind': 'Independent',
-      };
-
-      function getConfName(g) {
-        const seo = g.away?.conferences?.[0]?.conferenceSeo ||
-                    g.home?.conferences?.[0]?.conferenceSeo || '';
-        return confSeoToName[seo] || g.away?.conferences?.[0]?.conferenceName ||
-               g.home?.conferences?.[0]?.conferenceName || 'Independent';
-      }
-
-      // Double-sort: each game appears under BOTH teams' conferences
-      const byConf = {};
-      for (const g of otherGames) {
-        const awaySeo = g.away?.conferences?.[0]?.conferenceSeo || '';
-        const homeSeo = g.home?.conferences?.[0]?.conferenceSeo || '';
-        const awayConf = confSeoToName[awaySeo] || g.away?.conferences?.[0]?.conferenceName || 'Independent';
-        const homeConf = confSeoToName[homeSeo] || g.home?.conferences?.[0]?.conferenceName || 'Independent';
-
-        // Add to away team's conference
-        if (!byConf[awayConf]) byConf[awayConf] = [];
-        byConf[awayConf].push(g);
-
-        // Add to home team's conference if different
-        if (homeConf !== awayConf) {
-          if (!byConf[homeConf]) byConf[homeConf] = [];
-          byConf[homeConf].push(g);
-        }
-      }
-
-      // If conference filter specified, show only that conference
       if (confFilter) {
-        const matchedConf = Object.keys(byConf).find(c => c.toLowerCase() === confFilter.toLowerCase());
-        if (matchedConf) {
-          output += `\n📋 *${matchedConf}*\n`;
-          const confGames = byConf[matchedConf];
-          const lines = [];
-          for (const state of ['live', 'final', 'pre']) {
-            confGames
-              .filter(g => g.gameState === state)
-              .forEach(g => { const line = formatScoreLine(g); if (line) lines.push(line); });
+        // Conference filter: match team abbreviation or name substring
+        const cf = confFilter.toLowerCase();
+        const filtered = otherGames.filter(g =>
+          g.away.abbrev.toLowerCase().includes(cf) ||
+          g.away.name.toLowerCase().includes(cf) ||
+          g.home.abbrev.toLowerCase().includes(cf) ||
+          g.home.name.toLowerCase().includes(cf)
+        );
+        if (filtered.length > 0) {
+          output += `\n📋 *${confFilter}*\n`;
+          for (const state of ['in', 'post', 'pre']) {
+            filtered.filter(g => g.state === state)
+              .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
           }
-          output += lines.join('\n') + '\n';
         } else {
-          output += `\n❌ Conference "${confFilter}" not found today.\nTry: acc, big ten, sec, mvc, big 12, pac-12, american, cusa, mac, sun belt, horizon, summit, wcc, wac, patriot, ivy, maac, asun, caa, southern, southland\n`;
+          output += `\n❌ No games found matching "${confFilter}" today.\n`;
         }
       } else {
         output += `\n📋 *All Other D1 Games*\n`;
-        for (const conf of Object.keys(byConf).sort()) {
-          const confGames = byConf[conf];
-          // Collect all game lines for this conference
-          const lines = [];
-          for (const state of ['live', 'final', 'pre']) {
-            confGames
-              .filter(g => g.gameState === state)
-              .forEach(g => { const line = formatScoreLine(g); if (line) lines.push(line); });
+        // Group by state: live first, then final, then scheduled
+        for (const state of ['in', 'post', 'pre']) {
+          const group = otherGames.filter(g => g.state === state);
+          if (group.length > 0) {
+            const label = state === 'in' ? 'LIVE' : state === 'pre' ? 'SCHEDULED' : 'FINAL';
+            output += `\n${label}\n`;
+            group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
           }
-          if (lines.length === 0) continue;
-          output += `\n*${conf}*\n${lines.join('\n')}\n`;
         }
       }
     }
 
   } else {
-    // D2/D3: Regional schools only, no "all other games"
+    // D2/D3: Regional filter
     const isRegional = division === 'd2' ? isRegionalD2 : isRegionalD3;
-    const regionalGames = games.filter(g => {
-      const away = g.away?.names?.short || '';
-      const home = g.home?.names?.short || '';
-      return isRegional(away) || isRegional(home);
-    });
+    const regionalGames = games.filter(g => isRegional(g.away.abbrev) || isRegional(g.home.abbrev));
 
     if (regionalGames.length === 0) {
       return output + `No regional games found today.\n\nChecked ${games.length} total ${divLabel} games.`;
     }
 
     output += `\n🎯 *Regional ${divLabel} Games (IL/WI/IA/MN/ND/SD)*\n`;
-    for (const state of ['live', 'final', 'pre']) {
-      const group = regionalGames.filter(g => g.gameState === state);
+    for (const state of ['in', 'post', 'pre']) {
+      const group = regionalGames.filter(g => g.state === state);
       if (group.length > 0) {
-        const label = state === 'live' ? 'LIVE' : state === 'pre' ? 'Scheduled' : 'Final';
-        const lines = group.map(g => formatScoreLine(g)).filter(Boolean);
-        if (lines.length) output += `${label}: ${lines.join(' | ')}\n`;
+        const label = state === 'in' ? 'LIVE' : state === 'pre' ? 'SCHEDULED' : 'FINAL';
+        output += `\n${label}\n`;
+        group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
       }
     }
-  }
-
-  return output;
-}
-
-// ─── MLB Scores ───────────────────────────────────────────────────────────────
-
-// ─── MLB Data ─────────────────────────────────────────────────────────────────
-
-const MLB_DIVISION_ORDER = {
-  'AL East':    ['NYY','BOS','TOR','BAL','TB'],
-  'AL Central': ['CLE','MIN','CWS','DET','KC'],
-  'AL West':    ['HOU','TEX','SEA','LAA','OAK'],
-  'NL East':    ['NYM','PHI','ATL','MIA','WSH'],
-  'NL Central': ['MIL','CHC','STL','PIT','CIN'],
-  'NL West':    ['LAD','SF','SD','ARI','COL'],
-};
-
-// All team name/city/nickname variations → abbreviation
-const MLB_TEAM_LOOKUP = {
-  // AL East
-  'nyy':'NYY','yankees':'NYY','new york yankees':'NYY','ny yankees':'NYY',
-  'bos':'BOS','red sox':'BOS','boston':'BOS','boston red sox':'BOS',
-  'tor':'TOR','blue jays':'TOR','toronto':'TOR','toronto blue jays':'TOR',
-  'bal':'BAL','orioles':'BAL','baltimore':'BAL','baltimore orioles':'BAL',
-  'tb':'TB','rays':'TB','tampa bay':'TB','tampa':'TB','tampa bay rays':'TB',
-  // AL Central
-  'cle':'CLE','guardians':'CLE','cleveland':'CLE','cleveland guardians':'CLE',
-  'min':'MIN','twins':'MIN','minnesota':'MIN','minnesota twins':'MIN',
-  'cws':'CWS','white sox':'CWS','chicago white sox':'CWS',
-  'det':'DET','tigers':'DET','detroit':'DET','detroit tigers':'DET',
-  'kc':'KC','royals':'KC','kansas city':'KC','kansas city royals':'KC',
-  // AL West
-  'hou':'HOU','astros':'HOU','houston':'HOU','houston astros':'HOU',
-  'tex':'TEX','rangers':'TEX','texas':'TEX','texas rangers':'TEX',
-  'sea':'SEA','mariners':'SEA','seattle':'SEA','seattle mariners':'SEA',
-  'laa':'LAA','angels':'LAA','los angeles angels':'LAA','la angels':'LAA',
-  'oak':'OAK','athletics':'OAK','oakland':'OAK','oakland athletics':'OAK',
-  // NL East
-  'nym':'NYM','mets':'NYM','new york mets':'NYM','ny mets':'NYM',
-  'phi':'PHI','phillies':'PHI','philadelphia':'PHI','philadelphia phillies':'PHI',
-  'atl':'ATL','braves':'ATL','atlanta':'ATL','atlanta braves':'ATL',
-  'mia':'MIA','marlins':'MIA','miami':'MIA','miami marlins':'MIA',
-  'wsh':'WSH','nationals':'WSH','washington':'WSH','washington nationals':'WSH','wsh':'WSH',
-  // NL Central
-  'mil':'MIL','brewers':'MIL','milwaukee':'MIL','milwaukee brewers':'MIL',
-  'chc':'CHC','cubs':'CHC','chicago cubs':'CHC',
-  'stl':'STL','cardinals':'STL','st louis':'STL','st. louis':'STL','cardinals':'STL',
-  'pit':'PIT','pirates':'PIT','pittsburgh':'PIT','pittsburgh pirates':'PIT',
-  'cin':'CIN','reds':'CIN','cincinnati':'CIN','cincinnati reds':'CIN',
-  // NL West
-  'lad':'LAD','dodgers':'LAD','los angeles dodgers':'LAD','la dodgers':'LAD',
-  'sf':'SF','giants':'SF','san francisco':'SF','san francisco giants':'SF',
-  'sd':'SD','padres':'SD','san diego':'SD','san diego padres':'SD',
-  'ari':'ARI','diamondbacks':'ARI','arizona':'ARI','arizona diamondbacks':'ARI','dbacks':'ARI',
-  'col':'COL','rockies':'COL','colorado':'COL','colorado rockies':'COL',
-};
-
-// Division keyword → division name
-const MLB_DIVISION_KEYWORDS = {
-  'al east': 'AL East', 'al-east': 'AL East', 'ale': 'AL East',
-  'al central': 'AL Central', 'al-central': 'AL Central', 'alc': 'AL Central',
-  'al west': 'AL West', 'al-west': 'AL West', 'alw': 'AL West',
-  'nl east': 'NL East', 'nl-east': 'NL East', 'nle': 'NL East',
-  'nl central': 'NL Central', 'nl-central': 'NL Central', 'nlc': 'NL Central',
-  'nl west': 'NL West', 'nl-west': 'NL West', 'nlw': 'NL West',
-  'al': 'AL', 'american league': 'AL',
-  'nl': 'NL', 'national league': 'NL',
-};
-
-function getMlbDivision(abbrev) {
-  for (const [div, teams] of Object.entries(MLB_DIVISION_ORDER)) {
-    if (teams.includes(abbrev)) return div;
-  }
-  return 'Other';
-}
-
-function resolveMlbTeam(text) {
-  return MLB_TEAM_LOOKUP[text.toLowerCase().trim()] || null;
-}
-
-function resolveMlbDivisionFilter(text) {
-  const lower = text.toLowerCase().trim();
-  // Sort longest first to avoid 'al' matching inside 'al east'
-  const sorted = Object.entries(MLB_DIVISION_KEYWORDS)
-    .sort((a, b) => b[0].length - a[0].length);
-  for (const [kw, div] of sorted) {
-    if (lower.includes(kw)) return div;
-  }
-  return null;
-}
-
-// Format a single MLB game line (shared by scores + team lookup)
-function formatMlbGameLine(g) {
-  const away = g.teams?.away?.team?.abbreviation || '?';
-  const home = g.teams?.home?.team?.abbreviation || '?';
-  const awayScore = g.teams?.away?.score ?? '';
-  const homeScore = g.teams?.home?.score ?? '';
-  const state = g.status?.abstractGameState || '';
-  const detailedState = g.status?.detailedState || '';
-
-  if (state === 'Final') {
-    const awayWon = (Number(awayScore) > Number(homeScore));
-    const awayFmt = awayWon ? `*${away}*` : away;
-    const homeFmt = !awayWon ? `*${home}*` : home;
-    const extra = g.linescore?.currentInning > 9
-      ? ` (F/${g.linescore.currentInning})` : '';
-    return `  ${awayFmt} ${awayScore}, ${homeFmt} ${homeScore}${extra}`;
-  } else if (state === 'Live') {
-    const inning = g.linescore?.currentInning || '';
-    const half = g.linescore?.isTopInning ? 'Top' : 'Bot';
-    return `  ${away} ${awayScore}, ${home} ${homeScore} — ${half} ${inning}`;
-  } else {
-    const gameTime = g.gameDate
-      ? new Date(g.gameDate).toLocaleTimeString('en-US', {
-          hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/Chicago'
-        })
-      : 'TBA';
-    const ppd = detailedState.toLowerCase().includes('postponed') ? ' — PPD' : '';
-    return `  ${away} vs ${home} — ${gameTime} CT${ppd}`;
-  }
-}
-
-// Fetch all games for a date, return raw array
-async function fetchMlbGamesRaw(dateStr = null) {
-  let targetDate;
-  if (!dateStr) {
-    targetDate = new Date();
-  } else {
-    targetDate = new Date(dateStr + 'T12:00:00');
-    if (isNaN(targetDate)) return null;
-  }
-  const yyyy = targetDate.getFullYear();
-  const mm = String(targetDate.getMonth() + 1).padStart(2, '0');
-  const dd = String(targetDate.getDate()).padStart(2, '0');
-  const url = `https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=${yyyy}-${mm}-${dd}&hydrate=linescore,team`;
-  console.log(`⚾ Fetching MLB games: ${url}`);
-  const res = await axios.get(url, { timeout: 8000 });
-  const dates = res.data?.dates || [];
-  return { games: dates.length > 0 ? dates[0].games || [] : [], targetDate };
-}
-
-// Full MLB scoreboard — optionally filtered to one division or league
-async function fetchMlbScores(dateStr = null, divFilter = null) {
-  const result = await fetchMlbGamesRaw(dateStr);
-  if (!result) return '❌ Invalid date. Use YYYY-MM-DD';
-  const { games, targetDate } = result;
-
-  const dateLabel = targetDate.toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
-  });
-
-  const filterLabel = divFilter ? ` — ${divFilter}` : '';
-  let output = `⚾ *MLB Scores${filterLabel} — ${dateLabel}*\n───\n`;
-
-  if (games.length === 0) return output + 'No games today.';
-
-  // Double-sort: each game appears under BOTH teams' divisions
-  const byDiv = {};
-  for (const g of games) {
-    const awayAbbrev = g.teams?.away?.team?.abbreviation || '';
-    const homeAbbrev = g.teams?.home?.team?.abbreviation || '';
-    const awayDiv = getMlbDivision(awayAbbrev);
-    const homeDiv = getMlbDivision(homeAbbrev);
-
-    // Add under away team's division
-    if (awayDiv && awayDiv !== 'Other') {
-      if (!byDiv[awayDiv]) byDiv[awayDiv] = [];
-      byDiv[awayDiv].push(g);
-    }
-
-    // Add under home team's division if different
-    if (homeDiv && homeDiv !== 'Other' && homeDiv !== awayDiv) {
-      if (!byDiv[homeDiv]) byDiv[homeDiv] = [];
-      byDiv[homeDiv].push(g);
-    }
-
-    // Fallback if neither team resolved
-    if ((!awayDiv || awayDiv === 'Other') && (!homeDiv || homeDiv === 'Other')) {
-      if (!byDiv['Other']) byDiv['Other'] = [];
-      byDiv['Other'].push(g);
-    }
-  }
-
-  // Determine which divisions to show
-  let divsToShow = Object.keys(MLB_DIVISION_ORDER);
-  if (divFilter === 'AL') {
-    divsToShow = divsToShow.filter(d => d.startsWith('AL'));
-  } else if (divFilter === 'NL') {
-    divsToShow = divsToShow.filter(d => d.startsWith('NL'));
-  } else if (divFilter) {
-    divsToShow = divsToShow.filter(d => d === divFilter);
-  }
-
-  let anyGames = false;
-  for (const div of divsToShow) {
-    const divGames = byDiv[div];
-    if (!divGames || divGames.length === 0) continue;
-    anyGames = true;
-    output += `\n*${div}*\n`;
-    const live      = divGames.filter(g => g.status?.abstractGameState === 'Live');
-    const final     = divGames.filter(g => g.status?.abstractGameState === 'Final');
-    const scheduled = divGames.filter(g => g.status?.abstractGameState === 'Preview');
-    for (const g of [...live, ...final, ...scheduled]) {
-      output += formatMlbGameLine(g) + '\n';
-    }
-  }
-
-  if (!anyGames) output += `No ${divFilter || 'MLB'} games today.`;
-  return output;
-}
-
-// Single team scores — shows today's game(s) for one team
-async function fetchMlbTeamScore(teamAbbrev, dateStr = null) {
-  const result = await fetchMlbGamesRaw(dateStr);
-  if (!result) return '❌ Invalid date. Use YYYY-MM-DD';
-  const { games, targetDate } = result;
-
-  const abbrev = teamAbbrev.toUpperCase();
-  const teamGames = games.filter(g => {
-    const away = g.teams?.away?.team?.abbreviation || '';
-    const home = g.teams?.home?.team?.abbreviation || '';
-    return away === abbrev || home === abbrev;
-  });
-
-  const dateLabel = targetDate.toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
-  });
-
-  let output = `⚾ *${abbrev} — ${dateLabel}*\n───\n`;
-
-  if (teamGames.length === 0) {
-    return output + `No ${abbrev} games today.`;
-  }
-
-  for (const g of teamGames) {
-    output += formatMlbGameLine(g) + '\n';
-  }
-  return output;
-}
-
-// MLB Standings by division
-// MLB Opening Day — update each season
-const MLB_OPENING_DAY = new Date('2026-03-25T00:00:00');
-
-// Resolve season and date params for standings
-// Returns { season, dateParam, label }
-function resolveMlbStandingsSeason(argStr) {
-  if (!argStr) {
-    // Smart default: before Opening Day → show 2025 final, otherwise current
-    const now = new Date();
-    if (now < MLB_OPENING_DAY) {
-      return { season: '2025', dateParam: null, label: '2025 Final' };
-    }
-    return { season: String(now.getFullYear()), dateParam: null, label: null };
-  }
-
-  // Explicit 4-digit year e.g. "2025"
-  const yearMatch = argStr.match(/\b(20\d{2})\b/);
-  if (yearMatch && !argStr.includes('-', 5)) {
-    const yr = yearMatch[1];
-    return { season: yr, dateParam: null, label: `${yr} Final` };
-  }
-
-  // Explicit date e.g. "2026-04-15"
-  const dateMatch = argStr.match(/(\d{4}-\d{2}-\d{2})/);
-  if (dateMatch) {
-    const d = new Date(dateMatch[1] + 'T12:00:00');
-    const season = String(d.getFullYear());
-    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    return { season, dateParam: dateMatch[1], label: `as of ${label}` };
-  }
-
-  // Fallback — treat as current
-  const now = new Date();
-  return { season: String(now.getFullYear()), dateParam: null, label: null };
-}
-
-// MLB division ID → short display name (stable MLB Stats API constants)
-const MLB_DIVISION_ID_MAP = {
-  200: 'AL West',
-  201: 'AL East',
-  202: 'AL Central',
-  203: 'NL West',
-  204: 'NL East',
-  205: 'NL Central',
-};
-
-// Maps full MLB API division names → short display names (used by scores endpoint)
-const MLB_DIVISION_NAME_MAP = {
-  'American League East':    'AL East',
-  'American League Central': 'AL Central',
-  'American League West':    'AL West',
-  'National League East':    'NL East',
-  'National League Central': 'NL Central',
-  'National League West':    'NL West',
-};
-
-async function fetchMlbStandings(leagueFilter = null, argStr = null, divisionFilter = null) {
-  // If filtering to a single division, determine which league to fetch
-  // e.g. divisionFilter = 'NL East' → only need leagueId 104
-  let leagueIds;
-  if (divisionFilter) {
-    leagueIds = divisionFilter.startsWith('AL') ? '103' : '104';
-  } else {
-    leagueIds = leagueFilter === 'AL' ? '103'
-              : leagueFilter === 'NL' ? '104'
-              : '103,104';
-  }
-
-  const { season, dateParam, label } = resolveMlbStandingsSeason(argStr);
-
-  let url = `https://statsapi.mlb.com/api/v1/standings?leagueId=${leagueIds}&season=${season}&standingsTypes=regularSeason&hydrate=team`;
-  if (dateParam) url += `&date=${dateParam}`;
-
-  console.log(`📊 Fetching MLB standings: ${url}`);
-
-  const res = await axios.get(url, { timeout: 8000 });
-  const records = res.data?.records || [];
-
-  if (records.length === 0) return '📊 Standings not available yet.';
-
-  const filterLabel = divisionFilter ? ` — ${divisionFilter}`
-                    : leagueFilter  ? ` — ${leagueFilter}`
-                    : '';
-  const seasonLabel = label ? ` (${label})` : '';
-  let output = `📊 *MLB Standings${filterLabel}${seasonLabel}*\n───\n`;
-
-  // Sort divisions in our preferred order using ID-based names
-  const divOrder = Object.keys(MLB_DIVISION_ORDER);
-  records.sort((a, b) => {
-    const aName = MLB_DIVISION_ID_MAP[a.division?.id] || '';
-    const bName = MLB_DIVISION_ID_MAP[b.division?.id] || '';
-    const aIdx = divOrder.indexOf(aName);
-    const bIdx = divOrder.indexOf(bName);
-    return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
-  });
-
-  for (const divRecord of records) {
-    const divName = MLB_DIVISION_ID_MAP[divRecord.division?.id] || 'Division';
-
-    // Skip divisions that don't match the division filter
-    if (divisionFilter && divName !== divisionFilter) continue;
-
-    // Division header as bold markdown, team rows in monospace code block
-    output += `\n*${divName}*\n\`\`\`\n`;
-    output += `${'Team'.padEnd(5)} ${'W'.padStart(2)}-${'L'.padEnd(2)}  PCT    GB\n`;
-    output += `${'-'.repeat(27)}\n`;
-
-    const teams = divRecord.teamRecords || [];
-    for (const t of teams) {
-      const name = (t.team?.abbreviation || t.team?.teamName || '?').padEnd(5);
-      const w = String(t.wins ?? '-').padStart(2);
-      const l = String(t.losses ?? '-').padEnd(2);
-      const pct = t.winningPercentage
-        ? '.' + Number(t.winningPercentage).toFixed(3).slice(2)
-        : '.---';
-      const gb = t.gamesBack === '-' || t.gamesBack == null
-        ? '  —  '
-        : String(t.gamesBack).padStart(4) + ' ';
-      const streak = label ? '' : (t.streak?.streakCode || '');
-      output += `${name} ${w}-${l}  ${pct.padEnd(4)}  ${gb}${streak ? '  ' + streak : ''}\n`;
-    }
-    output += '```\n';
   }
 
   return output;
@@ -1254,21 +905,6 @@ const HELP_TEXT = [
   '/scores d2 — D2 regional scores',
   '/scores d3 — D3 regional scores',
   '/scores YYYY-MM-DD — Specific date',
-  '',
-  '⚾ MLB',
-  '/mlb — Today\'s MLB scores by division',
-  '/mlb cubs — Single team score',
-  '/mlb al east — One division',
-  '/mlb al — Full American League',
-  '/mlb nl — Full National League',
-  '/mlb YYYY-MM-DD — Specific date',
-  '/mlbstandings — Full standings (smart default)',
-  '/mlbstandings al — AL only',
-  '/mlbstandings nl — NL only',
-  '/mlbstandings nl east — Single division',
-  '/mlbstandings al central — Single division',
-  '/mlbstandings 2025 — Full 2025 final standings',
-  '/mlbstandings 2026-04-15 — Standings as of date',
   '',
   'ℹ️ General',
   '/start — Bot status',
@@ -1506,7 +1142,7 @@ async function fetchNcaaScoresMultiDay(division, dateStr, daysAhead, confFilter)
 
       if (dayGames.length > 0) {
         let dayOutput = `\n📅 *${dayLabel}*\n`;
-        for (const state of ['live', 'final', 'pre']) {
+        for (const state of ['live', 'final', 'preview']) {
           dayGames
             .filter(g => g.gameState === state)
             .forEach(g => {
@@ -1618,74 +1254,6 @@ bot.onText(/\/scores(?:\s+(.+))?$/, async (msg, match) => {
   } catch (error) {
     console.error('✗ /scores error:', error.message);
     await bot.sendMessage(chatId, `❌ Failed to fetch scores: ${error.message}`);
-  }
-});
-
-bot.onText(/\/mlb(?:\s+(.+))?$/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  const argStr = (match[1] || '').trim();
-  const lower = argStr.toLowerCase();
-
-  // Date
-  const dateStr = argStr.match(/\d{4}-\d{2}-\d{2}/)?.[0] || null;
-
-  // Team lookup — e.g. /mlb cubs  /mlb NYY
-  const teamAbbrev = resolveMlbTeam(lower.replace(/\d{4}-\d{2}-\d{2}/, '').trim());
-
-  // Division/league filter — e.g. /mlb al east  /mlb nl
-  const divFilter = !teamAbbrev ? resolveMlbDivisionFilter(lower) : null;
-
-  try {
-    let result;
-    if (teamAbbrev) {
-      await bot.sendMessage(chatId, `⚾ Fetching ${teamAbbrev} score...`);
-      result = await fetchMlbTeamScore(teamAbbrev, dateStr);
-    } else {
-      const label = divFilter || 'MLB';
-      await bot.sendMessage(chatId, `⚾ Fetching ${label} scores...`);
-      result = await fetchMlbScores(dateStr, divFilter);
-    }
-    await sendChunked(chatId, result, { parse_mode: 'Markdown' });
-  } catch (error) {
-    console.error('✗ /mlb error:', error.message);
-    await bot.sendMessage(chatId, `❌ Failed to fetch MLB scores: ${error.message}`);
-  }
-});
-
-bot.onText(/\/mlbstandings(?:\s+(.+))?$/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  const argStr = (match[1] || '').trim();
-  const lower = argStr.toLowerCase();
-
-  // Try full division filter first — e.g. "nl east", "al central"
-  const divisionFilter = resolveMlbDivisionFilter(lower);
-
-  // League-only filter — e.g. "al", "nl" (only if no full division matched)
-  const upper = argStr.toUpperCase();
-  const leagueFilter = !divisionFilter
-    ? (upper.startsWith('AL') ? 'AL' : upper.startsWith('NL') ? 'NL' : null)
-    : null;
-
-  // Season/date arg — strip any league or division keywords before parsing
-  const seasonArg = argStr
-    .replace(/^(al east|al central|al west|nl east|nl central|nl west|al|nl)\s*/i, '')
-    .trim() || null;
-
-  try {
-    await bot.sendMessage(chatId, '📊 Fetching MLB standings...');
-
-    let result;
-    if (divisionFilter) {
-      // Single division — fetch full standings then filter output to that division
-      result = await fetchMlbStandings(null, seasonArg, divisionFilter);
-    } else {
-      result = await fetchMlbStandings(leagueFilter, seasonArg, null);
-    }
-
-    await sendChunked(chatId, result, { parse_mode: 'Markdown' });
-  } catch (error) {
-    console.error('✗ /mlbstandings error:', error.message);
-    await bot.sendMessage(chatId, `❌ Failed to fetch standings: ${error.message}`);
   }
 });
 
@@ -1908,6 +1476,7 @@ async function main() {
   console.log(`✓ Calendar chron scheduled for 7 AM Central daily`);
   console.log(`✓ Chat ID: ${CHAT_ID}`);
   console.log(`✓ Reading from ${calendarsConfig.length} calendars`);
+
 }
 
 main();
