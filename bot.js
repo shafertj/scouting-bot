@@ -728,8 +728,9 @@ const ESPN_CONF_MAP = {
   // Missouri Valley (Illinois State, Murray State, Southern Illinois, Belmont,
   //                  Valparaiso, Indiana State, Evansville, Illinois-Chicago, Bradley)
   'ILST': 'Missouri Valley', 'MUR': 'Missouri Valley', 'SIU': 'Missouri Valley',
-  'BELM': 'Missouri Valley', 'VAL': 'Missouri Valley', 'INST': 'Missouri Valley',
-  'EVAN': 'Missouri Valley', 'UIC': 'Missouri Valley', 'BRAD': 'Missouri Valley',
+  'BELM': 'Missouri Valley', 'BEL': 'Missouri Valley', 'VAL': 'Missouri Valley',
+  'INST': 'Missouri Valley', 'EVAN': 'Missouri Valley', 'UIC': 'Missouri Valley',
+  'BRAD': 'Missouri Valley',
 
   // Mountain West (Nevada, Air Force, San Diego State, San Jose State, New Mexico,
   //                Washington State, Fresno State, Grand Canyon, UNLV)
@@ -835,7 +836,11 @@ function normalizeEspnGame(event) {
   if (!awayComp || !homeComp) return null;
 
   const status = event.status?.type;
-  const state = status?.state || 'pre'; // 'pre', 'in', 'post'
+  const state = status?.state || 'pre';
+
+  const awayAbbrev = awayComp.team?.abbreviation || '';
+  const homeAbbrev = homeComp.team?.abbreviation || '';
+  if (!awayAbbrev || !homeAbbrev) return null; // skip NAIA/non-D1 opponents
 
   return {
     _espn: true,
