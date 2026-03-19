@@ -601,7 +601,7 @@ function isRegionalD3(name) {
 // Use /scores debug or ESPN scoreboard to verify abbreviations
 const NCAA_TEAM_MAP = {
   'NDSU': 'NDSU',
-  'SDSU': 'SDSU',
+  'SDST': 'SDSU',
   'ILL': 'Illinois',
   'ILST': 'Illinois St',
   'WIU': 'WIU',
@@ -645,8 +645,8 @@ const ESPN_CONF_MAP = {
   // Atlantic 10 (VCU, George Mason, Saint Joseph's, Fordham, Saint Louis,
   //              George Washington, Dayton, Davidson, Rhode Island, Richmond,
   //              La Salle, St. Bonaventure)
-  'VCU': 'Atlantic 10', 'GMU': 'Atlantic 10', 'SJU': 'Atlantic 10',
-  'FORD': 'Atlantic 10', 'SLU': 'Atlantic 10', 'GWU': 'Atlantic 10',
+  'VCU': 'Atlantic 10', 'GMU': 'Atlantic 10', 'SJU': 'Atlantic 10', 'JOES': 'Atlantic 10',
+  'FORD': 'Atlantic 10', 'SLU': 'Atlantic 10', 'GWU': 'Atlantic 10', 'GW': 'Atlantic 10',
   'DAY': 'Atlantic 10', 'DAV': 'Atlantic 10', 'URI': 'Atlantic 10',
   'RICH': 'Atlantic 10', 'LAS': 'Atlantic 10', 'SBON': 'Atlantic 10',
   'GTWN': 'Atlantic 10', 'MASS': 'Atlantic 10',
@@ -665,9 +665,9 @@ const ESPN_CONF_MAP = {
 
   // Big South (Winthrop, Gardner-Webb, USC Upstate, Presbyterian, Longwood,
   //            High Point, UNC Asheville, Charleston Southern, Radford)
-  'WIN': 'Big South', 'GWEB': 'Big South', 'USCU': 'Big South', 'PRES': 'Big South',
-  'LONG': 'Big South', 'HPU': 'Big South', 'UNCA': 'Big South', 'CHSO': 'Big South',
-  'RAD': 'Big South',
+  'WIN': 'Big South', 'GWEB': 'Big South', 'USCU': 'Big South', 'UPST': 'Big South',
+  'PRES': 'Big South', 'LONG': 'Big South', 'HPU': 'Big South', 'UNCA': 'Big South',
+  'CHSO': 'Big South', 'RAD': 'Big South',
 
   // Big Ten (UCLA, Nebraska, USC, Oregon, Iowa, Rutgers, Washington, Purdue,
   //          Minnesota, Illinois, Maryland, Northwestern, Penn State, Indiana,
@@ -687,9 +687,9 @@ const ESPN_CONF_MAP = {
 
   // CAA / Coastal (UNCW, Northeastern, Campbell, Monmouth, College of Charleston,
   //                Elon, Hofstra, NC A&T, Stony Brook, Towson, William & Mary)
-  'UNCW': 'CAA', 'NE': 'CAA', 'CAMP': 'CAA', 'MONM': 'CAA', 'COFC': 'CAA',
-  'ELON': 'CAA', 'HOF': 'CAA', 'NCAT': 'CAA', 'SBU': 'CAA', 'TOW': 'CAA',
-  'W&M': 'CAA', 'DREX': 'CAA', 'DEL': 'CAA',
+  'UNCW': 'CAA', 'NE': 'CAA', 'CAMP': 'CAA', 'CAM': 'CAA', 'MONM': 'CAA',
+  'COFC': 'CAA', 'ELON': 'CAA', 'HOF': 'CAA', 'NCAT': 'CAA', 'SBU': 'CAA',
+  'TOW': 'CAA', 'W&M': 'CAA', 'DREX': 'CAA', 'DEL': 'CAA', 'NORF': 'CAA',
 
   // C-USA (Jacksonville State, Louisiana Tech, Western Kentucky, Missouri State,
   //        Dallas Baptist, Middle Tennessee, Liberty, Kennesaw State,
@@ -715,7 +715,7 @@ const ESPN_CONF_MAP = {
   //                         Iona, Sacred Heart, Quinnipiac, Siena, Niagara,
   //                         Manhattan, Canisius, Saint Peter's)
   'RIDE': 'MAAC', 'MRMK': 'MAAC', 'MSM': 'MAAC', 'MERR': 'MAAC',
-  'FAIR': 'MAAC', 'IONA': 'MAAC', 'SHU': 'MAAC', 'QUNN': 'MAAC',
+  'FAIR': 'MAAC', 'IONA': 'MAAC', 'SHU': 'MAAC', 'QUNN': 'MAAC', 'QUC': 'MAAC',
   'SIEN': 'MAAC', 'NIAG': 'MAAC', 'MANH': 'MAAC', 'CANI': 'MAAC',
   'SPU': 'MAAC',
 
@@ -733,7 +733,7 @@ const ESPN_CONF_MAP = {
 
   // Mountain West (Nevada, Air Force, San Diego State, San Jose State, New Mexico,
   //                Washington State, Fresno State, Grand Canyon, UNLV)
-  'NEV': 'Mountain West', 'AF': 'Mountain West', 'SDST': 'Mountain West',
+  'NEV': 'Mountain West', 'AF': 'Mountain West', 'SDSU': 'Mountain West',
   'SJSU': 'Mountain West', 'UNM': 'Mountain West', 'WSU': 'Mountain West',
   'FRES': 'Mountain West', 'GCU': 'Mountain West', 'UNLV': 'Mountain West',
 
@@ -748,7 +748,7 @@ const ESPN_CONF_MAP = {
   // OVC (Southeast Missouri State, Southern Indiana, Eastern Illinois, Little Rock,
   //      Lindenwood, Morehead State, Tennessee-Martin, Tennessee Tech,
   //      SIU Edwardsville, Western Illinois)
-  'SEMO': 'OVC', 'SOIN': 'OVC', 'EIU': 'OVC', 'UALR': 'OVC',
+  'SEMO': 'OVC', 'SOIN': 'OVC', 'USI': 'OVC', 'EIU': 'OVC', 'UALR': 'OVC',
   'LIND': 'OVC', 'MORH': 'OVC', 'UTM': 'OVC', 'TNTC': 'OVC',
   'SIUE': 'OVC', 'WIU': 'OVC', 'APSU': 'OVC', 'EKU': 'OVC',
 
@@ -756,13 +756,17 @@ const ESPN_CONF_MAP = {
   'BUCK': 'Patriot', 'HC': 'Patriot', 'LEHG': 'Patriot', 'NAVY': 'Patriot',
   'ARMY': 'Patriot', 'LAF': 'Patriot',
 
+  // ASUN
+  'FGCU': 'ASUN', 'JAX': 'ASUN', 'KENN': 'ASUN', 'LIP': 'ASUN', 'LIB': 'ASUN',
+  'NKU': 'ASUN', 'UNF': 'ASUN', 'BELL': 'ASUN', 'UNA': 'ASUN',
+
   // SEC (Auburn, Kentucky, Florida, Texas, Georgia, Oklahoma, Arkansas,
   //      Vanderbilt, Texas A&M, Mississippi State, Ole Miss, Tennessee,
   //      LSU, Missouri, Alabama, South Carolina)
   'AUB': 'SEC', 'UK': 'SEC', 'FLA': 'SEC', 'TEX': 'SEC', 'UGA': 'SEC',
   'OU': 'SEC', 'ARK': 'SEC', 'VAN': 'SEC', 'TA&M': 'SEC', 'MSST': 'SEC',
-  'MISS': 'SEC', 'TENN': 'SEC', 'LSU': 'SEC', 'MIZZ': 'SEC', 'ALA': 'SEC',
-  'SC': 'SEC', 'USA': 'SEC',
+  'MISS': 'SEC', 'TENN': 'SEC', 'LSU': 'SEC', 'MIZZ': 'SEC', 'MIZ': 'SEC',
+  'ALA': 'SEC', 'SC': 'SEC', 'USA': 'SEC',
 
   // SoCon (Mercer, VMI, East Tennessee State, Western Carolina, Wofford,
   //        UNC Greensboro, The Citadel, Samford)
@@ -778,16 +782,16 @@ const ESPN_CONF_MAP = {
 
   // Summit (Oral Roberts, Omaha, St. Thomas, Northern Colorado,
   //         South Dakota State, North Dakota State)
-  'ORAL': 'Summit', 'OMAH': 'Summit', 'STTH': 'Summit', 'UNCO': 'Summit',
-  'SDSU': 'Summit', 'NDSU': 'Summit',
+  'ORAL': 'Summit', 'OMA': 'Summit', 'OMAH': 'Summit', 'STTH': 'Summit',
+  'UNCO': 'Summit', 'SDST': 'Summit', 'NDSU': 'Summit',
 
   // Sun Belt (Coastal Carolina, James Madison, Marshall, UL Monroe, Louisiana,
   //           Arkansas State, Troy, Southern Miss, South Alabama, Old Dominion,
   //           Texas State, Appalachian State, Georgia State, Georgia Southern)
   'CCU': 'Sun Belt', 'JMU': 'Sun Belt', 'MRSH': 'Sun Belt', 'ULM': 'Sun Belt',
-  'ULL': 'Sun Belt', 'ARST': 'Sun Belt', 'TROY': 'Sun Belt', 'USM': 'Sun Belt',
-  'USA': 'Sun Belt', 'ODU': 'Sun Belt', 'TXST': 'Sun Belt', 'APP': 'Sun Belt',
-  'GAST': 'Sun Belt', 'GASO': 'Sun Belt',
+  'ULL': 'Sun Belt', 'UL': 'Sun Belt', 'ARST': 'Sun Belt', 'TROY': 'Sun Belt',
+  'USM': 'Sun Belt', 'USA': 'Sun Belt', 'ODU': 'Sun Belt', 'TXST': 'Sun Belt',
+  'APP': 'Sun Belt', 'GAST': 'Sun Belt', 'GASO': 'Sun Belt',
 
   // SWAC (Bethune-Cookman, Arkansas-Pine Bluff, Texas Southern, Florida A&M,
   //       Alabama A&M, Grambling, Alabama State, Jackson State, Southern,
