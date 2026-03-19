@@ -675,7 +675,7 @@ function formatScoreLine(g) {
     const homeBold = g.home?.winner ? `*${homeDisplay}*` : homeDisplay;
     return `${awayBold} ${awayScore}, ${homeBold} ${homeScore}`;
   } else if (g.state === 'in') {
-    return `🔴 ${awayDisplay} ${g.away?.score}, ${homeDisplay} ${g.home?.score} — ${g.detail}`;
+    return `🟢 ${awayDisplay} ${g.away?.score}, ${homeDisplay} ${g.home?.score} — ${g.detail}`;
   } else {
     // Format time from UTC date string to CST
     let timeStr = g.detail || 'TBA';
@@ -693,7 +693,7 @@ function formatScoreLine(g) {
 async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = null) {
   let targetDate;
   if (!dateStr) {
-    targetDate = new Date();
+    targetDate = new Date(getTodayCST() + 'T12:00:00');
   } else {
     targetDate = new Date(dateStr + 'T12:00:00');
     if (isNaN(targetDate)) return '❌ Invalid date. Use YYYY-MM-DD';
