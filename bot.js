@@ -618,6 +618,200 @@ const NCAA_TEAM_MAP = {
   'STTH': 'St. Thomas',
 };
 
+// ─── ESPN Conference Lookup ───────────────────────────────────────────────────
+// Maps ESPN team abbreviation → conference name
+// Source of truth: NCAA D1 standings + real ESPN scoreboard abbreviations
+// When a new abbreviation appears in "Other", add it here
+const ESPN_CONF_MAP = {
+  // ACC (Florida State, North Carolina, Virginia, Georgia Tech, NC State, Pittsburgh,
+  //      Louisville, Wake Forest, Duke, Notre Dame, Boston College, Clemson, Miami,
+  //      Virginia Tech, Stanford, California, SMU)
+  'FSU': 'ACC', 'UNC': 'ACC', 'UVA': 'ACC', 'GT': 'ACC', 'NCSU': 'ACC',
+  'PITT': 'ACC', 'LOU': 'ACC', 'WAKE': 'ACC', 'DUKE': 'ACC', 'ND': 'ACC',
+  'BC': 'ACC', 'CLEM': 'ACC', 'MIA': 'ACC', 'VT': 'ACC', 'STAN': 'ACC',
+  'CAL': 'ACC', 'SMU': 'ACC',
+
+  // America East (Bryant, Binghamton, UMBC, UMass Lowell, NJIT, Maine, Albany)
+  'BRYA': 'America East', 'BING': 'America East', 'UMBC': 'America East',
+  'UML': 'America East', 'NJIT': 'America East', 'MAINE': 'America East',
+  'ALB': 'America East', 'NHVN': 'America East', 'STBK': 'America East',
+
+  // American Athletic (South Florida, UTSA, Charlotte, Wichita State, Florida Atlantic,
+  //                    UAB, East Carolina, Rice, Tulane, Memphis)
+  'USF': 'American', 'UTSA': 'American', 'CLT': 'American', 'WICH': 'American',
+  'FAU': 'American', 'UAB': 'American', 'ECU': 'American', 'RICE': 'American',
+  'TULN': 'American', 'MEM': 'American',
+
+  // Atlantic 10 (VCU, George Mason, Saint Joseph's, Fordham, Saint Louis,
+  //              George Washington, Dayton, Davidson, Rhode Island, Richmond,
+  //              La Salle, St. Bonaventure)
+  'VCU': 'Atlantic 10', 'GMU': 'Atlantic 10', 'SJU': 'Atlantic 10',
+  'FORD': 'Atlantic 10', 'SLU': 'Atlantic 10', 'GWU': 'Atlantic 10',
+  'DAY': 'Atlantic 10', 'DAV': 'Atlantic 10', 'URI': 'Atlantic 10',
+  'RICH': 'Atlantic 10', 'LAS': 'Atlantic 10', 'SBON': 'Atlantic 10',
+  'GTWN': 'Atlantic 10', 'MASS': 'Atlantic 10',
+
+  // Big 12 (UCF, Kansas State, West Virginia, Arizona State, Utah, Texas Tech,
+  //         BYU, Cincinnati, Houston, Kansas, TCU, Arizona, Baylor, Oklahoma State)
+  'UCF': 'Big 12', 'KSU': 'Big 12', 'WVU': 'Big 12', 'ASU': 'Big 12',
+  'UTAH': 'Big 12', 'TTU': 'Big 12', 'BYU': 'Big 12', 'CIN': 'Big 12',
+  'HOU': 'Big 12', 'KU': 'Big 12', 'TCU': 'Big 12', 'ARIZ': 'Big 12',
+  'BAY': 'Big 12', 'OKST': 'Big 12',
+
+  // Big East (Georgetown, Creighton, Seton Hall, Connecticut, Villanova,
+  //           St. John's, Xavier, Butler)
+  'GTWN': 'Big East', 'CREI': 'Big East', 'HALL': 'Big East', 'CONN': 'Big East',
+  'VILL': 'Big East', 'STJN': 'Big East', 'XAV': 'Big East', 'BUT': 'Big East',
+
+  // Big South (Winthrop, Gardner-Webb, USC Upstate, Presbyterian, Longwood,
+  //            High Point, UNC Asheville, Charleston Southern, Radford)
+  'WIN': 'Big South', 'GWEB': 'Big South', 'USCU': 'Big South', 'PRES': 'Big South',
+  'LONG': 'Big South', 'HPU': 'Big South', 'UNCA': 'Big South', 'CHSO': 'Big South',
+  'RAD': 'Big South',
+
+  // Big Ten (UCLA, Nebraska, USC, Oregon, Iowa, Rutgers, Washington, Purdue,
+  //          Minnesota, Illinois, Maryland, Northwestern, Penn State, Indiana,
+  //          Ohio State, Michigan State, Michigan)
+  'UCLA': 'Big Ten', 'NEB': 'Big Ten', 'USC': 'Big Ten', 'ORE': 'Big Ten',
+  'IOWA': 'Big Ten', 'RUTG': 'Big Ten', 'WASH': 'Big Ten', 'PUR': 'Big Ten',
+  'MINN': 'Big Ten', 'ILL': 'Big Ten', 'MD': 'Big Ten', 'NW': 'Big Ten',
+  'PSU': 'Big Ten', 'IND': 'Big Ten', 'OSU': 'Big Ten', 'MSU': 'Big Ten',
+  'MICH': 'Big Ten',
+
+  // Big West (Cal Poly, UC San Diego, Cal State Fullerton, UC Santa Barbara,
+  //           UC Davis, Cal State Northridge, Long Beach State, UC Riverside,
+  //           Hawaii, UC Irvine, CSU Bakersfield)
+  'CAL P': 'Big West', 'UCSD': 'Big West', 'CSUF': 'Big West', 'UCSB': 'Big West',
+  'UCD': 'Big West', 'CSUN': 'Big West', 'LBSU': 'Big West', 'UCR': 'Big West',
+  'HAW': 'Big West', 'UCI': 'Big West', 'CSUB': 'Big West', 'UTU': 'Big West',
+
+  // CAA / Coastal (UNCW, Northeastern, Campbell, Monmouth, College of Charleston,
+  //                Elon, Hofstra, NC A&T, Stony Brook, Towson, William & Mary)
+  'UNCW': 'CAA', 'NE': 'CAA', 'CAMP': 'CAA', 'MONM': 'CAA', 'COFC': 'CAA',
+  'ELON': 'CAA', 'HOF': 'CAA', 'NCAT': 'CAA', 'SBU': 'CAA', 'TOW': 'CAA',
+  'W&M': 'CAA', 'DREX': 'CAA', 'DEL': 'CAA',
+
+  // C-USA (Jacksonville State, Louisiana Tech, Western Kentucky, Missouri State,
+  //        Dallas Baptist, Middle Tennessee, Liberty, Kennesaw State,
+  //        New Mexico State, Sam Houston, Delaware, Florida International)
+  'JKST': 'C-USA', 'LT': 'C-USA', 'WKU': 'C-USA', 'MOST': 'C-USA',
+  'DBU': 'C-USA', 'MTSU': 'C-USA', 'LIB': 'C-USA', 'KENN': 'C-USA',
+  'NMSU': 'C-USA', 'SHSU': 'C-USA', 'DEL': 'C-USA', 'FIU': 'C-USA',
+  'CARK': 'C-USA', 'UTEP': 'C-USA',
+
+  // Horizon (Milwaukee, Oakland, Northern Kentucky, Youngstown State, Wright State)
+  'MIL': 'Horizon', 'OAKL': 'Horizon', 'NKU': 'Horizon', 'YSU': 'Horizon',
+  'WRST': 'Horizon', 'UIC': 'Horizon', 'IUPU': 'Horizon',
+
+  // Independent
+  'ORST': 'Independent',
+
+  // Ivy League (Yale, Brown, Princeton, Pennsylvania, Dartmouth, Columbia,
+  //             Cornell, Harvard)
+  'YALE': 'Ivy', 'BRWN': 'Ivy', 'PRIN': 'Ivy', 'PENN': 'Ivy',
+  'DART': 'Ivy', 'COR': 'Ivy', 'HARV': 'Ivy', 'COLU': 'Ivy',
+
+  // MAAC / Metro Atlantic (Rider, Marist, Mount St. Mary's, Merrimack, Fairfield,
+  //                         Iona, Sacred Heart, Quinnipiac, Siena, Niagara,
+  //                         Manhattan, Canisius, Saint Peter's)
+  'RIDE': 'MAAC', 'MRMK': 'MAAC', 'MSM': 'MAAC', 'MERR': 'MAAC',
+  'FAIR': 'MAAC', 'IONA': 'MAAC', 'SHU': 'MAAC', 'QUNN': 'MAAC',
+  'SIEN': 'MAAC', 'NIAG': 'MAAC', 'MANH': 'MAAC', 'CANI': 'MAAC',
+  'SPU': 'MAAC',
+
+  // MAC (Kent State, Miami OH, Ball State, Toledo, Western Michigan, NIU,
+  //      Akron, Bowling Green, UMass, Central Michigan, Ohio, Eastern Michigan)
+  'KENT': 'MAC', 'MIOH': 'MAC', 'BALL': 'MAC', 'TOL': 'MAC', 'WMU': 'MAC',
+  'NIU': 'MAC', 'AKR': 'MAC', 'BGSU': 'MAC', 'UMASS': 'MAC', 'CMU': 'MAC',
+  'OHIO': 'MAC', 'EMU': 'MAC',
+
+  // Missouri Valley (Illinois State, Murray State, Southern Illinois, Belmont,
+  //                  Valparaiso, Indiana State, Evansville, Illinois-Chicago, Bradley)
+  'ILST': 'Missouri Valley', 'MUR': 'Missouri Valley', 'SIU': 'Missouri Valley',
+  'BELM': 'Missouri Valley', 'VAL': 'Missouri Valley', 'INST': 'Missouri Valley',
+  'EVAN': 'Missouri Valley', 'UIC': 'Missouri Valley', 'BRAD': 'Missouri Valley',
+
+  // Mountain West (Nevada, Air Force, San Diego State, San Jose State, New Mexico,
+  //                Washington State, Fresno State, Grand Canyon, UNLV)
+  'NEV': 'Mountain West', 'AF': 'Mountain West', 'SDST': 'Mountain West',
+  'SJSU': 'Mountain West', 'UNM': 'Mountain West', 'WSU': 'Mountain West',
+  'FRES': 'Mountain West', 'GCU': 'Mountain West', 'UNLV': 'Mountain West',
+
+  // NEC (Fairleigh Dickinson, Central Connecticut, Mercyhurst, Le Moyne,
+  //      Long Island, Stonehill, Wagner, Norfolk State, Coppin State,
+  //      New Haven, UMES, Delaware State)
+  'FDU': 'NEC', 'CCSU': 'NEC', 'MRCY': 'NEC', 'LEM': 'NEC',
+  'LIU': 'NEC', 'STNH': 'NEC', 'WAG': 'NEC', 'NSU': 'NEC',
+  'COPP': 'NEC', 'NHVN': 'NEC', 'UMES': 'NEC', 'DSU': 'NEC',
+  'MRMK': 'NEC', 'MRSH': 'NEC',
+
+  // OVC (Southeast Missouri State, Southern Indiana, Eastern Illinois, Little Rock,
+  //      Lindenwood, Morehead State, Tennessee-Martin, Tennessee Tech,
+  //      SIU Edwardsville, Western Illinois)
+  'SEMO': 'OVC', 'SOIN': 'OVC', 'EIU': 'OVC', 'UALR': 'OVC',
+  'LIND': 'OVC', 'MORH': 'OVC', 'UTM': 'OVC', 'TNTC': 'OVC',
+  'SIUE': 'OVC', 'WIU': 'OVC', 'APSU': 'OVC', 'EKU': 'OVC',
+
+  // Patriot (Bucknell, Holy Cross, Lehigh, Navy, Army, Lafayette)
+  'BUCK': 'Patriot', 'HC': 'Patriot', 'LEHG': 'Patriot', 'NAVY': 'Patriot',
+  'ARMY': 'Patriot', 'LAF': 'Patriot',
+
+  // SEC (Auburn, Kentucky, Florida, Texas, Georgia, Oklahoma, Arkansas,
+  //      Vanderbilt, Texas A&M, Mississippi State, Ole Miss, Tennessee,
+  //      LSU, Missouri, Alabama, South Carolina)
+  'AUB': 'SEC', 'UK': 'SEC', 'FLA': 'SEC', 'TEX': 'SEC', 'UGA': 'SEC',
+  'OU': 'SEC', 'ARK': 'SEC', 'VAN': 'SEC', 'TA&M': 'SEC', 'MSST': 'SEC',
+  'MISS': 'SEC', 'TENN': 'SEC', 'LSU': 'SEC', 'MIZZ': 'SEC', 'ALA': 'SEC',
+  'SC': 'SEC', 'USA': 'SEC',
+
+  // SoCon (Mercer, VMI, East Tennessee State, Western Carolina, Wofford,
+  //        UNC Greensboro, The Citadel, Samford)
+  'MER': 'SoCon', 'VMI': 'SoCon', 'ETSU': 'SoCon', 'WCU': 'SoCon',
+  'WOF': 'SoCon', 'UNCG': 'SoCon', 'CIT': 'SoCon', 'SAM': 'SoCon',
+
+  // Southland (Northwestern State, Lamar, Southeastern Louisiana, Houston Christian,
+  //            Stephen F. Austin, UT Rio Grande Valley, Incarnate Word, McNeese,
+  //            Nicholls, New Orleans, Texas A&M-Corpus Christi)
+  'NWST': 'Southland', 'LAM': 'Southland', 'SELA': 'Southland', 'HCU': 'Southland',
+  'SFAU': 'Southland', 'RGV': 'Southland', 'UIW': 'Southland', 'MCNS': 'Southland',
+  'NICH': 'Southland', 'UNO': 'Southland', 'TXST': 'Southland',
+
+  // Summit (Oral Roberts, Omaha, St. Thomas, Northern Colorado,
+  //         South Dakota State, North Dakota State)
+  'ORAL': 'Summit', 'OMAH': 'Summit', 'STTH': 'Summit', 'UNCO': 'Summit',
+  'SDSU': 'Summit', 'NDSU': 'Summit',
+
+  // Sun Belt (Coastal Carolina, James Madison, Marshall, UL Monroe, Louisiana,
+  //           Arkansas State, Troy, Southern Miss, South Alabama, Old Dominion,
+  //           Texas State, Appalachian State, Georgia State, Georgia Southern)
+  'CCU': 'Sun Belt', 'JMU': 'Sun Belt', 'MRSH': 'Sun Belt', 'ULM': 'Sun Belt',
+  'ULL': 'Sun Belt', 'ARST': 'Sun Belt', 'TROY': 'Sun Belt', 'USM': 'Sun Belt',
+  'USA': 'Sun Belt', 'ODU': 'Sun Belt', 'TXST': 'Sun Belt', 'APP': 'Sun Belt',
+  'GAST': 'Sun Belt', 'GASO': 'Sun Belt',
+
+  // SWAC (Bethune-Cookman, Arkansas-Pine Bluff, Texas Southern, Florida A&M,
+  //       Alabama A&M, Grambling, Alabama State, Jackson State, Southern,
+  //       Alcorn State, Mississippi Valley State, Prairie View)
+  'BCU': 'SWAC', 'UAPB': 'SWAC', 'TXSO': 'SWAC', 'FAMU': 'SWAC',
+  'AAMU': 'SWAC', 'GRAM': 'SWAC', 'ALST': 'SWAC', 'JXST': 'SWAC',
+  'SOU': 'SWAC', 'ALCN': 'SWAC', 'MVSU': 'SWAC', 'PV': 'SWAC',
+
+  // WAC (California Baptist, Tarleton, Utah Tech, Utah Valley, Abilene Christian,
+  //      Sacramento State, UT Arlington)
+  'CBU': 'WAC', 'TAR': 'WAC', 'UTU': 'WAC', 'UVU': 'WAC',
+  'ACU': 'WAC', 'SAC': 'WAC', 'UTA': 'WAC', 'TARL': 'WAC',
+
+  // WCC (Portland, Saint Mary's, Santa Clara, San Francisco, Pacific,
+  //      Gonzaga, San Diego, Loyola Marymount, Pepperdine, Seattle)
+  'PORT': 'WCC', 'SMC': 'WCC', 'SCU': 'WCC', 'USFCA': 'WCC',
+  'PAC': 'WCC', 'GONZ': 'WCC', 'USD': 'WCC', 'LMU': 'WCC',
+  'PEPP': 'WCC', 'SEA': 'WCC', 'SM': 'WCC',
+};
+
+function getEspnConference(abbrev) {
+  return ESPN_CONF_MAP[abbrev] || 'Other';
+}
+
 function isCoverageTeam(name) {
   return name in NCAA_TEAM_MAP;
 }
@@ -771,17 +965,18 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
       }
     }
 
-    // All other D1 — flat list for now (conference sorting TBD)
+    // All other D1 — grouped by conference
     if (otherGames.length > 0) {
       if (confFilter) {
-        // Conference filter: match team abbreviation or name substring
+        // Conference filter: match against ESPN_CONF_MAP
         const cf = confFilter.toLowerCase();
-        const filtered = otherGames.filter(g =>
-          g.away.abbrev.toLowerCase().includes(cf) ||
-          g.away.name.toLowerCase().includes(cf) ||
-          g.home.abbrev.toLowerCase().includes(cf) ||
-          g.home.name.toLowerCase().includes(cf)
-        );
+        const filtered = otherGames.filter(g => {
+          const awayConf = getEspnConference(g.away.abbrev).toLowerCase();
+          const homeConf = getEspnConference(g.home.abbrev).toLowerCase();
+          return awayConf.includes(cf) || homeConf.includes(cf) ||
+                 g.away.name.toLowerCase().includes(cf) ||
+                 g.home.name.toLowerCase().includes(cf);
+        });
         if (filtered.length > 0) {
           output += `\n📋 *${confFilter}*\n`;
           for (const state of ['in', 'post', 'pre']) {
@@ -792,14 +987,35 @@ async function fetchNcaaScores(division = 'd1', dateStr = null, confFilter = nul
           output += `\n❌ No games found matching "${confFilter}" today.\n`;
         }
       } else {
+        // Build conference → games map with double-sort
+        const byConf = {};
+        for (const g of otherGames) {
+          const awayConf = getEspnConference(g.away.abbrev);
+          const homeConf = getEspnConference(g.home.abbrev);
+
+          if (!byConf[awayConf]) byConf[awayConf] = [];
+          byConf[awayConf].push(g);
+
+          if (homeConf !== awayConf) {
+            if (!byConf[homeConf]) byConf[homeConf] = [];
+            byConf[homeConf].push(g);
+          }
+        }
+
+        // Sort: known conferences alphabetically, Other always last
+        const confOrder = Object.keys(byConf).sort((a, b) => {
+          if (a === 'Other') return 1;
+          if (b === 'Other') return -1;
+          return a.localeCompare(b);
+        });
+
         output += `\n📋 *All Other D1 Games*\n`;
-        // Group by state: live first, then final, then scheduled
-        for (const state of ['in', 'post', 'pre']) {
-          const group = otherGames.filter(g => g.state === state);
-          if (group.length > 0) {
-            const label = state === 'in' ? 'LIVE' : state === 'pre' ? 'SCHEDULED' : 'FINAL';
-            output += `\n${label}\n`;
-            group.forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
+        for (const conf of confOrder) {
+          output += `\n*${conf}*\n`;
+          const confGames = byConf[conf];
+          for (const state of ['in', 'post', 'pre']) {
+            confGames.filter(g => g.state === state)
+              .forEach(g => { const line = formatScoreLine(g); if (line) output += `  ${line}\n`; });
           }
         }
       }
